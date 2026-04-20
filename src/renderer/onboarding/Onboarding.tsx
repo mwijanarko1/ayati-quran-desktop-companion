@@ -4,9 +4,10 @@ import { ApiKeysStep } from './steps/ApiKeysStep';
 import { WatchStep } from './steps/WatchStep';
 import { HotkeysStep } from './steps/HotkeysStep';
 import { CompleteStep } from './steps/CompleteStep';
+import { OnboardingIcon } from './OnboardingIcon';
 import { DEFAULT_AI_PROVIDER, DEFAULT_OPENROUTER_BASE_URL, DEFAULT_OPENROUTER_MODEL, type ClawBotProvider } from '../aiProviderDefaults';
 
-export type WorkspaceType = 'clawster';
+export type WorkspaceType = 'ayati';
 
 export interface OnboardingData {
   workspaceType: WorkspaceType;
@@ -24,7 +25,7 @@ export interface OnboardingData {
 }
 
 const INITIAL_DATA: OnboardingData = {
-  workspaceType: 'clawster',
+  workspaceType: 'ayati',
   launchOnStartup: true,
   aiProvider: DEFAULT_AI_PROVIDER,
   gatewayUrl: DEFAULT_OPENROUTER_BASE_URL,
@@ -33,20 +34,26 @@ const INITIAL_DATA: OnboardingData = {
   watchFolders: [],
   watchActiveApp: false,
   watchWindowTitles: false,
-  hotkeyOpenChat: 'CommandOrControl+Shift+Space',
-  hotkeyCaptureScreen: 'CommandOrControl+Shift+/',
-  hotkeyOpenAssistant: 'CommandOrControl+Shift+A',
+  hotkeyOpenChat: 'CommandOrControl+Alt+,',
+  hotkeyCaptureScreen: 'CommandOrControl+Alt+/',
+  hotkeyOpenAssistant: 'CommandOrControl+Alt+.',
 };
 
 type Step = 'welcome' | 'apiKeys' | 'watch' | 'hotkeys' | 'complete';
 
 const STEP_ORDER: Step[] = ['welcome', 'apiKeys', 'watch', 'hotkeys', 'complete'];
 
+function hasEditedAiSetup(data: OnboardingData): boolean {
+  return data.aiProvider !== INITIAL_DATA.aiProvider
+    || data.gatewayUrl !== INITIAL_DATA.gatewayUrl
+    || data.gatewayToken !== INITIAL_DATA.gatewayToken
+    || data.gatewayModel !== INITIAL_DATA.gatewayModel;
+}
+
 export function Onboarding() {
   const [currentStep, setCurrentStep] = useState<Step>('welcome');
   const [data, setData] = useState<OnboardingData>(INITIAL_DATA);
   const [isCompleting, setIsCompleting] = useState(false);
-  const [stepKey, setStepKey] = useState(0);
 
   const updateData = useCallback((updates: Partial<OnboardingData>) => {
     setData(prev => ({ ...prev, ...updates }));
@@ -56,7 +63,7 @@ export function Onboarding() {
   useEffect(() => {
     const loadDefaults = async () => {
       try {
-        const settings = await window.clawster.getSettings() as {
+        const settings = await window.ayati.getSettings() as {
           clawbot?: {
             provider?: ClawBotProvider;
             url?: string;
@@ -64,11 +71,16 @@ export function Onboarding() {
             model?: string;
           };
         };
-        updateData({
-          aiProvider: settings.clawbot?.provider || DEFAULT_AI_PROVIDER,
-          gatewayUrl: settings.clawbot?.url || DEFAULT_OPENROUTER_BASE_URL,
-          gatewayToken: '',
-          gatewayModel: settings.clawbot?.model || DEFAULT_OPENROUTER_MODEL,
+        setData((currentData) => {
+          if (hasEditedAiSetup(currentData)) return currentData;
+
+          return {
+            ...currentData,
+            aiProvider: settings.clawbot?.provider || DEFAULT_AI_PROVIDER,
+            gatewayUrl: settings.clawbot?.url || DEFAULT_OPENROUTER_BASE_URL,
+            gatewayToken: '',
+            gatewayModel: settings.clawbot?.model || DEFAULT_OPENROUTER_MODEL,
+          };
         });
       } catch (error) {
         console.error('Failed to load defaults:', error);
@@ -76,12 +88,11 @@ export function Onboarding() {
     };
 
     loadDefaults();
-  }, [updateData]);
+  }, []);
 
   const currentStepIndex = STEP_ORDER.indexOf(currentStep);
 
   const goToStep = useCallback((step: Step) => {
-    setStepKey(prev => prev + 1);
     setCurrentStep(step);
   }, []);
 
@@ -101,17 +112,25 @@ export function Onboarding() {
 
   const handleSkip = useCallback(async () => {
     try {
-      await window.clawster.onboardingSkip();
+      await window.ayati.onboardingSkip();
     } catch (error) {
       console.error('Failed to skip onboarding:', error);
     }
+  }, []);
+
+  const handleMinimize = useCallback(() => {
+    window.ayati.onboardingMinimize();
+  }, []);
+
+  const handleMaximize = useCallback(() => {
+    window.ayati.onboardingMaximize();
   }, []);
 
   const handleComplete = useCallback(async () => {
     setIsCompleting(true);
 
     try {
-      await window.clawster.onboardingComplete({
+      await window.ayati.onboardingComplete({
         ...data,
       });
     } catch (error) {
@@ -129,7 +148,7 @@ export function Onboarding() {
   const getNextButtonText = () => {
     if (currentStep === 'welcome') return 'Get Started';
     if (currentStep === 'complete') {
-      if (isCompleting) return 'Waking up...';
+      if (isCompleting) return 'Waking up…';
       return 'Open Ayati - Quran Desktop Companion';
     }
     return 'Continue';
@@ -169,54 +188,75 @@ export function Onboarding() {
   };
 
   return (
-    <div className="w-full h-full bg-[#AFF9C9] rounded-xl shadow-2xl relative flex flex-col overflow-hidden"
-         style={{ boxShadow: '0 25px 50px -12px rgba(7, 18, 15, 0.28), 0 0 0 1px rgba(7, 18, 15, 0.14)' }}>
+    <div className="w-full h-full bg-[#FAF9F6] rounded-3xl shadow-2xl relative flex flex-col overflow-hidden"
+         style={{ boxShadow: '0 32px 64px -12px rgba(26, 42, 36, 0.12), 0 0 0 1px rgba(26, 42, 36, 0.05)' }}>
 
-      {/* Top Bar (Draggable) - macOS window chrome */}
-      <div className="drag-region h-11 flex items-center px-4 w-full z-50 select-none bg-[#ececec] border-b border-[#cfcfcf] shrink-0 relative">
-        <div className="absolute left-4 flex items-center gap-2">
+      {/* Top Bar (Draggable) - macOS window chrome — redesigned for premium feel */}
+      <div className="drag-region h-14 flex items-center px-6 w-full z-50 select-none bg-white border-b border-[#1a2a24]/[0.05] shrink-0 relative">
+        {/* Window Controls */}
+        <div className="absolute left-6 flex items-center gap-2">
           <button
-            className="no-drag w-3 h-3 rounded-full bg-[#ff5f57] hover:bg-[#ff453a] transition-colors cursor-pointer shrink-0 border border-black/10"
+            className="no-drag w-3 h-3 rounded-full bg-[#ff5f57] hover:bg-[#ff453a] transition-colors cursor-pointer shrink-0 border border-black/05"
             onClick={handleSkip}
             title="Close"
             aria-label="Close setup"
           />
-          <div className="w-3 h-3 rounded-full bg-[#febc2e] border border-black/10" aria-hidden="true" />
-          <div className="w-3 h-3 rounded-full bg-[#28c840] border border-black/10" aria-hidden="true" />
+          <button
+            className="no-drag w-3 h-3 rounded-full bg-[#febc2e] hover:bg-[#e0a926] transition-colors cursor-pointer shrink-0 border border-black/05"
+            onClick={handleMinimize}
+            title="Minimize"
+            aria-label="Minimize"
+          />
+          <button
+            className="no-drag w-3 h-3 rounded-full bg-[#28c840] hover:bg-[#20a134] transition-colors cursor-pointer shrink-0 border border-black/05"
+            onClick={handleMaximize}
+            title="Zoom"
+            aria-label="Zoom"
+          />
         </div>
 
+        {/* Brand/Title */}
         <div className="flex-1 flex items-center justify-center">
-          <span className="brand-display text-xs text-[#242424] font-semibold">Ayati - Quran Desktop Companion Setup</span>
+          <span className="brand-display flex items-baseline gap-1.5 text-[13px] font-bold tracking-tight">
+            <span className="text-[#1a2a24]">Ayati</span>
+            <span className="text-[#67E0A3]">Setup Companion</span>
+          </span>
         </div>
 
-        <div className="absolute right-4 flex items-center gap-1.5">
-          {STEP_ORDER.map((step, index) => (
-            <div
-              key={step}
-              className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${
-                index === currentStepIndex
-                  ? 'bg-[#666666]'
-                  : index < currentStepIndex
-                  ? 'bg-[#9a9a9a]'
-                  : 'bg-[#c8c8c8]'
-              }`}
-            />
-          ))}
+        {/* Step Progress Indicators */}
+        <div className="absolute right-6 flex items-center gap-2">
+          {STEP_ORDER.map((step, index) => {
+            const isActive = index === currentStepIndex;
+            const isCompleted = index < currentStepIndex;
+
+            return (
+              <div
+                key={step}
+                className={`h-1.5 rounded-full transition-[background-color,width] duration-150 ease-out ${
+                  isActive
+                    ? 'bg-[#67E0A3] w-6'
+                    : isCompleted
+                    ? 'bg-[#AFF9C9] w-1.5'
+                    : 'bg-[#1a2a24]/10 w-1.5'
+                }`}
+              />
+            );
+          })}
         </div>
       </div>
 
       {/* Center Stage Content */}
-      <div className="no-drag flex-1 pb-20 overflow-y-auto scrollbar-hide relative w-full">
-        <div key={stepKey} className="step-enter h-full">
+      <div className="no-drag onboarding-scroll flex-1 overflow-y-auto scrollbar-hide relative w-full pb-20">
+        <div className="min-h-full">
           {renderStep()}
         </div>
       </div>
 
-      {/* Action Footer */}
-      <div className="no-drag h-[72px] absolute bottom-0 w-full flex items-center justify-end gap-3 px-6 bg-[#AFF9C9]/92 backdrop-blur-md border-t border-[#07120f]/15 z-50 select-none">
+      {/* Action Footer — solid bg, no backdrop-blur to avoid compositing cost */}
+      <div className="no-drag h-[88px] absolute bottom-0 w-full flex items-center justify-between px-10 bg-[#FAF9F6] border-t border-[#1a2a24]/[0.05] z-50 select-none">
         <button
           onClick={handleSkip}
-          className="px-4 py-2.5 rounded-lg text-sm font-medium text-[#35584b] hover:text-[#07120f] hover:bg-[#7CF0BD]/55 transition-colors"
+          className="px-4 py-2.5 rounded-xl text-sm font-medium text-[#1a2a24]/40 hover:text-[#1a2a24] hover:bg-[#1a2a24]/05 transition-colors"
         >
           Skip setup
         </button>
@@ -224,14 +264,14 @@ export function Onboarding() {
         <button
           onClick={handleNextClick}
           disabled={isNextDisabled() || isCompleting}
-          className={`px-5 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+          className={`px-8 py-3.5 rounded-2xl text-sm font-semibold transition-[background-color,transform] duration-150 flex items-center gap-2.5 ${
             isNextDisabled() || isCompleting
-              ? 'bg-[#07120f]/35 text-[#AFF9C9]/80 cursor-not-allowed'
-              : 'bg-[#07120f] text-[#AFF9C9] hover:bg-[#10231c] shadow-[0_10px_28px_rgba(7,18,15,0.18)]'
+              ? 'bg-[#1a2a24]/10 text-[#1a2a24]/30 cursor-not-allowed'
+              : 'bg-[#1a2a24] text-[#FAF9F6] hover:bg-[#2a3a34] active:scale-[0.98]'
           }`}
         >
           {isCompleting && (
-            <iconify-icon icon="solar:spinner-linear" width="1rem" className="animate-spin"></iconify-icon>
+            <OnboardingIcon name="spinner" size="1.125rem" className="animate-spin" />
           )}
           {getNextButtonText()}
         </button>

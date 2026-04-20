@@ -12,6 +12,7 @@ import {
   Menu,
   systemPreferences,
   safeStorage,
+  clipboard,
 } from 'electron';
 import path from 'path';
 import fs from 'fs';
@@ -32,20 +33,33 @@ import {
 import { createStore } from './store';
 import { TutorialManager } from './tutorial';
 import { getFrontmostWindowTitleFromSystemEvents } from './window-title';
-import { buildContextualQuranNudge } from './ayah-contextual-nudges';
+import { buildContextualQuranNudge, buildTimedQuranReminder } from './ayah-contextual-nudges';
 import { analyzeScreenForAyah } from './ayah-scene-analyzer';
 import { selectAyahCandidateWithAi } from './ayah-ai-selector';
 import { fetchVerseContentForReflection as fetchVerseContentWithFallback } from './ayah-reflection-content';
 import {
   createDefaultAyahLensState,
+  addReflectionToCollectionLocal,
   deleteReflection,
   markReflectionPendingSync,
   markReflectionSynced,
   saveReflectionLocally,
+  saveReflectionNoteLocal,
+  setReflectionFeedbackLocal,
+  upsertCollectionLocal,
   updateReflection,
 } from './ayah-reflection-store';
-import { rankAyahCandidates } from './ayah-theme-engine';
-import type { AyahLensSettings, AyahLensState, AyahReflection, QuranAuthStatus, QuranVerseContent } from './ayah-types';
+import { rankAyahCandidates, type AyahFeedbackSignal } from './ayah-theme-engine';
+import type {
+  AyahCollection,
+  AyahDaySummary,
+  AyahLensSettings,
+  AyahLensState,
+  AyahReflection,
+  QuranAuthStatus,
+  QuranStreakSummary,
+  QuranVerseContent,
+} from './ayah-types';
 import { createPkcePair, QuranFoundationClient, QuranFoundationError, type StoredTokenSet } from './quran-foundation-client';
 import { QURAN_OAUTH_SCOPES } from './quran-oauth-scopes';
 import { resolveQuranClientConfig } from './quran-runtime-config';
@@ -53,6 +67,26 @@ import { getDefaultClawBotModel } from './ai-provider-defaults';
 import { DEFAULT_HOTKEYS, sanitizeAccelerator } from './hotkeys';
 import { getAiProviderConfig } from './ai-providers';
 import { getWindowPositionNearAnchor } from './window-positioning';
+import {
+  createConfiguredUpdateState,
+  createInitialUpdateState,
+  getAutoUpdateDisabledReason,
+  isArm64HostRunningIntelBuild,
+  reduceUpdateStateOnCheckFailure,
+  reduceUpdateStateOnCheckStart,
+  reduceUpdateStateOnDownloadComplete,
+  reduceUpdateStateOnDownloadFailure,
+  reduceUpdateStateOnDownloadProgress,
+  reduceUpdateStateOnDownloadStart,
+  reduceUpdateStateOnInstallFailure,
+  reduceUpdateStateOnNoUpdate,
+  reduceUpdateStateOnUpdateAvailable,
+  resolveDesktopRuntimeInfo,
+  shouldBroadcastDownloadProgress,
+  type DesktopUpdateActionResult,
+  type DesktopUpdateCheckResult,
+  type DesktopUpdateState,
+} from './updates';
 
 const execFileAsync = promisify(execFile);
 
@@ -86,9 +120,41 @@ let clawbot: ClawBotClient | null = null;
 const store = createStore();
 const tutorialManager = new TutorialManager(store);
 let quranOAuthSession: { state: string; nonce: string; verifier: string } | null = null;
+const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
+  platform: process.platform,
+  processArch: process.arch,
+  runningUnderArm64Translation: Boolean(
+    (app as { runningUnderARM64Translation?: boolean }).runningUnderARM64Translation,
+  ),
+});
+let updateState: DesktopUpdateState = createInitialUpdateState(app.getVersion(), desktopRuntimeInfo);
+let updaterConfigured = false;
+let updateCheckInFlight = false;
+let updateDownloadInFlight = false;
+let updateInstallInFlight = false;
+let updateStartupTimer: NodeJS.Timeout | null = null;
+let updatePollTimer: NodeJS.Timeout | null = null;
 
 const isDev = !app.isPackaged;
 const DEV_PORT = process.env.VITE_DEV_PORT || '5173';
+const UPDATE_STATE_CHANNEL = 'update-state';
+const UPDATE_GET_STATE_CHANNEL = 'update-get-state';
+const UPDATE_CHECK_CHANNEL = 'update-check';
+const UPDATE_DOWNLOAD_CHANNEL = 'update-download';
+const UPDATE_INSTALL_CHANNEL = 'update-install';
+const AUTO_UPDATE_STARTUP_DELAY_MS = 10_000;
+const AUTO_UPDATE_POLL_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const REQUIRED_QURAN_DEMO_SCOPES = [
+  'collection',
+  'collection.create',
+  'note',
+  'note.create',
+  'activity_day',
+  'activity_day.create',
+  'streak',
+  'streak.read',
+] as const;
+const DEFAULT_ACTIVITY_SECONDS = 30;
 const DEV_WINDOW_BORDER_CSS = `
   html, body {
     box-sizing: border-box !important;
@@ -213,6 +279,7 @@ function getAyahLensState(): AyahLensState {
     contentAuth: { ...defaultState.contentAuth, ...stored.contentAuth },
     preferences: { ...defaultState.preferences, ...stored.preferences },
     reflections: stored.reflections ?? [],
+    collections: stored.collections ?? [],
     pendingSync: stored.pendingSync ?? [],
     recentVerseKeys: stored.recentVerseKeys ?? [],
     nudgeState: { ...defaultState.nudgeState, ...stored.nudgeState },
@@ -272,11 +339,15 @@ function persistQuranUserTokens(tokens: StoredTokenSet): QuranAuthStatus {
 
 function getQuranAuthStatusFromState(state: AyahLensState): QuranAuthStatus {
   const hasToken = Boolean(state.quranAuth.encryptedAccessToken || state.quranAuth.encryptedRefreshToken);
+  const missingDemoScopes = REQUIRED_QURAN_DEMO_SCOPES.filter((scope) => !state.quranAuth.scopes.includes(scope));
   return {
     isConnected: hasToken && Boolean(state.quranAuth.expiresAt),
     userName: state.quranAuth.userName,
     scopes: state.quranAuth.scopes,
     expiresAt: state.quranAuth.expiresAt ?? undefined,
+    error: hasToken && missingDemoScopes.length > 0
+      ? 'Reconnect Quran Foundation to enable notes, collections, and streaks.'
+      : undefined,
   };
 }
 
@@ -378,6 +449,117 @@ async function fetchVerseContentForReflection(verseKey: string): Promise<QuranVe
   });
 }
 
+function getFeedbackSignals(state: AyahLensState): AyahFeedbackSignal[] {
+  return state.reflections
+    .filter((reflection) => reflection.feedback)
+    .map((reflection) => ({
+      verseKey: reflection.verseKey,
+      themeId: reflection.themes[0]?.id ?? 'unclear',
+      value: reflection.feedback?.value ?? 'relevant',
+    }));
+}
+
+function getUserTimezone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return undefined;
+  }
+}
+
+function getTodayDateKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getVerseRange(verseKey: string): string {
+  return `${verseKey}-${verseKey}`;
+}
+
+async function resolveTafsirResource(): Promise<{ id: number; name?: string } | null> {
+  const state = getAyahLensState();
+  if (state.preferences.tafsirResourceId) {
+    return {
+      id: state.preferences.tafsirResourceId,
+      name: state.preferences.tafsirResourceName ?? undefined,
+    };
+  }
+
+  const accessToken = await getQuranContentAccessToken();
+  const resources = await getQuranClient().fetchTafsirResources(accessToken);
+  const preferred = resources.find((resource) => (
+    /english/i.test(resource.languageName ?? '')
+    && /maarif|ibn kathir|saadi|tafheem/i.test(resource.name)
+  )) ?? resources.find((resource) => /english/i.test(resource.languageName ?? '')) ?? resources[0];
+  if (!preferred) return null;
+
+  setAyahLensState({
+    ...getAyahLensState(),
+    preferences: {
+      ...getAyahLensState().preferences,
+      tafsirResourceId: preferred.id,
+      tafsirResourceName: preferred.name,
+    },
+  });
+  return { id: preferred.id, name: preferred.name };
+}
+
+async function resolveRecitationResource(): Promise<{ id: number; name?: string } | null> {
+  const state = getAyahLensState();
+  if (state.preferences.recitationId) {
+    return {
+      id: state.preferences.recitationId,
+      name: state.preferences.reciterName ?? undefined,
+    };
+  }
+
+  const accessToken = await getQuranContentAccessToken();
+  const resources = await getQuranClient().fetchRecitationResources(accessToken);
+  const preferred = resources.find((resource) => /mishari|mishary|alafasy/i.test(resource.name)) ?? resources[0];
+  if (!preferred) return null;
+
+  setAyahLensState({
+    ...getAyahLensState(),
+    preferences: {
+      ...getAyahLensState().preferences,
+      recitationId: preferred.id,
+      reciterName: preferred.name,
+    },
+  });
+  return { id: preferred.id, name: preferred.name };
+}
+
+async function getAyahTafsirById(reflectionId: string): Promise<AyahReflection | null> {
+  const reflection = getAyahLensState().reflections.find((item) => item.id === reflectionId);
+  if (!reflection) return null;
+  if (reflection.tafsir) return reflection;
+
+  const resource = await resolveTafsirResource();
+  if (!resource) return reflection;
+
+  const accessToken = await getQuranContentAccessToken();
+  const tafsir = await getQuranClient().fetchTafsir(accessToken, reflection.verseKey, resource.id);
+  const nextReflection: AyahReflection = { ...reflection, tafsir };
+  const nextState = updateReflection(getAyahLensState(), nextReflection);
+  setAyahLensState(nextState);
+  return nextState.reflections.find((item) => item.id === reflectionId) ?? nextReflection;
+}
+
+async function getAyahAudioById(reflectionId: string): Promise<AyahReflection | null> {
+  const reflection = getAyahLensState().reflections.find((item) => item.id === reflectionId);
+  if (!reflection) return null;
+  if (reflection.audio) return reflection;
+
+  const resource = await resolveRecitationResource();
+  if (!resource) return reflection;
+
+  const accessToken = await getQuranContentAccessToken();
+  const audio = await getQuranClient().fetchAyahAudio(accessToken, reflection.verseKey, resource.id, resource.name);
+  const nextReflection: AyahReflection = { ...reflection, audio };
+  const nextState = updateReflection(getAyahLensState(), nextReflection);
+  setAyahLensState(nextState);
+  return nextState.reflections.find((item) => item.id === reflectionId) ?? nextReflection;
+}
+
 async function captureAyahReflection(): Promise<AyahReflection> {
   isCapturingAyahReflection = true;
   let capture: Awaited<ReturnType<typeof captureScreenWithContext>> | null = null;
@@ -390,10 +572,12 @@ async function captureAyahReflection(): Promise<AyahReflection> {
     }
 
     const insight = await analyzeScreenForAyah(clawbot, capture.image);
-    const candidates = rankAyahCandidates(insight, getAyahLensState().recentVerseKeys);
+    const state = getAyahLensState();
+    const candidates = rankAyahCandidates(insight, state.recentVerseKeys, getFeedbackSignals(state));
     const candidate = await selectAyahCandidateWithAi(clawbot, insight, candidates);
     const verse = await fetchVerseContentForReflection(candidate.verseKey);
-    const reflection = buildAyahReflection(verse, candidate, insight);
+    const candidateIndex = Math.max(0, candidates.findIndex((item) => item.verseKey === candidate.verseKey));
+    const reflection = buildAyahReflection(verse, candidate, insight, candidates.map((item) => item.verseKey), candidateIndex);
     setAyahLensState(saveReflectionLocally(getAyahLensState(), reflection));
     return reflection;
   } finally {
@@ -408,6 +592,9 @@ function buildAyahReflection(
   verse: QuranVerseContent,
   candidate: ReturnType<typeof rankAyahCandidates>[number],
   insight: Awaited<ReturnType<typeof analyzeScreenForAyah>>,
+  rankedCandidateVerseKeys: string[] = [candidate.verseKey],
+  sourceCandidateIndex = 0,
+  alternateGroupId: string = randomUUID(),
 ): AyahReflection {
   return {
     id: randomUUID(),
@@ -425,7 +612,26 @@ function buildAyahReflection(
     themes: insight.themes,
     createdAt: Date.now(),
     syncState: 'local',
+    rankedCandidateVerseKeys,
+    sourceCandidateIndex,
+    alternateGroupId,
   };
+}
+
+async function recordReflectionActivity(reflection: AyahReflection): Promise<void> {
+  const accessToken = await getQuranUserAccessToken();
+  if (!accessToken) return;
+
+  try {
+    await getQuranClient().recordActivityDay(accessToken, {
+      verseKey: reflection.verseKey,
+      mushafId: getAyahLensState().preferences.mushafId,
+      seconds: DEFAULT_ACTIVITY_SECONDS,
+      timezone: getUserTimezone(),
+    });
+  } catch {
+    setAyahLensState(markReflectionPendingSync(getAyahLensState(), reflection.id, 'activity'));
+  }
 }
 
 async function saveAyahReflectionById(reflectionId: string): Promise<AyahReflection | null> {
@@ -451,12 +657,246 @@ async function saveAyahReflectionById(reflectionId: string): Promise<AyahReflect
     });
     const syncedState = markReflectionSynced(getAyahLensState(), reflectionId, result.bookmarkId);
     setAyahLensState(syncedState);
-    return syncedState.reflections.find((item) => item.id === reflectionId) ?? savedReflection;
+    const syncedReflection = syncedState.reflections.find((item) => item.id === reflectionId) ?? savedReflection;
+    await recordReflectionActivity(syncedReflection);
+    return getAyahLensState().reflections.find((item) => item.id === reflectionId) ?? syncedReflection;
   } catch {
     const pendingState = markReflectionPendingSync(getAyahLensState(), reflectionId, 'bookmark');
     setAyahLensState(pendingState);
     return pendingState.reflections.find((item) => item.id === reflectionId) ?? savedReflection;
   }
+}
+
+async function saveAyahReflectionNoteById(reflectionId: string, body: string): Promise<AyahReflection | null> {
+  const trimmedBody = body.trim();
+  if (trimmedBody.length < 6 || trimmedBody.length > 10_000) return null;
+
+  const reflection = getAyahLensState().reflections.find((item) => item.id === reflectionId);
+  if (!reflection) return null;
+
+  const accessToken = await getQuranUserAccessToken();
+  if (!accessToken) {
+    const nextState = saveReflectionNoteLocal(getAyahLensState(), reflectionId, {
+      body: trimmedBody,
+      syncState: 'pending',
+    });
+    setAyahLensState(markReflectionPendingSync(nextState, reflectionId, 'note'));
+    return getAyahLensState().reflections.find((item) => item.id === reflectionId) ?? null;
+  }
+
+  try {
+    const quranNoteId = await getQuranClient().createNote(accessToken, {
+      reflectionId,
+      verseKey: reflection.verseKey,
+      body: trimmedBody,
+    });
+    const nextState = saveReflectionNoteLocal(getAyahLensState(), reflectionId, {
+      body: trimmedBody,
+      quranNoteId: quranNoteId ?? undefined,
+      syncState: quranNoteId ? 'synced' : 'local',
+    });
+    setAyahLensState(nextState);
+    return nextState.reflections.find((item) => item.id === reflectionId) ?? null;
+  } catch {
+    const noteState = saveReflectionNoteLocal(getAyahLensState(), reflectionId, {
+      body: trimmedBody,
+      syncState: 'pending',
+    });
+    setAyahLensState(markReflectionPendingSync(noteState, reflectionId, 'note'));
+    return getAyahLensState().reflections.find((item) => item.id === reflectionId) ?? null;
+  }
+}
+
+async function getAyahCollections(): Promise<AyahCollection[]> {
+  const accessToken = await getQuranUserAccessToken();
+  if (!accessToken) return getAyahLensState().collections;
+
+  try {
+    const collections = await getQuranClient().listCollections(accessToken);
+    setAyahLensState({
+      ...getAyahLensState(),
+      collections,
+    });
+    return collections;
+  } catch {
+    return getAyahLensState().collections;
+  }
+}
+
+async function createAyahCollection(name: string): Promise<AyahCollection> {
+  const safeName = name.trim().slice(0, 80);
+  if (!safeName) throw new Error('Collection name is required.');
+
+  const accessToken = await getQuranUserAccessToken();
+  if (!accessToken) {
+    const localCollection: AyahCollection = {
+      id: `local-${randomUUID()}`,
+      name: safeName,
+      syncState: 'pending',
+    };
+    setAyahLensState(upsertCollectionLocal(getAyahLensState(), localCollection));
+    return localCollection;
+  }
+
+  try {
+    const collection = await getQuranClient().createCollection(accessToken, safeName);
+    setAyahLensState(upsertCollectionLocal(getAyahLensState(), collection));
+    return collection;
+  } catch {
+    const localCollection: AyahCollection = {
+      id: `local-${randomUUID()}`,
+      name: safeName,
+      syncState: 'pending',
+    };
+    setAyahLensState(upsertCollectionLocal(getAyahLensState(), localCollection));
+    return localCollection;
+  }
+}
+
+async function addReflectionToCollectionById(reflectionId: string, collectionId: string): Promise<AyahReflection | null> {
+  const reflection = getAyahLensState().reflections.find((item) => item.id === reflectionId);
+  if (!reflection || !collectionId.trim()) return null;
+
+  const accessToken = await getQuranUserAccessToken();
+  if (!accessToken || collectionId.startsWith('local-')) {
+    const nextState = addReflectionToCollectionLocal(getAyahLensState(), reflectionId, collectionId);
+    setAyahLensState(markReflectionPendingSync(nextState, reflectionId, 'collection'));
+    return getAyahLensState().reflections.find((item) => item.id === reflectionId) ?? null;
+  }
+
+  try {
+    await getQuranClient().addCollectionBookmark(
+      accessToken,
+      collectionId,
+      reflection.verseKey,
+      getAyahLensState().preferences.mushafId,
+    );
+    const nextState = addReflectionToCollectionLocal(getAyahLensState(), reflectionId, collectionId);
+    setAyahLensState(nextState);
+    return nextState.reflections.find((item) => item.id === reflectionId) ?? null;
+  } catch {
+    const nextState = addReflectionToCollectionLocal(getAyahLensState(), reflectionId, collectionId);
+    setAyahLensState(markReflectionPendingSync(nextState, reflectionId, 'collection'));
+    return getAyahLensState().reflections.find((item) => item.id === reflectionId) ?? null;
+  }
+}
+
+function setReflectionFeedbackById(reflectionId: string, value: 'relevant' | 'not_relevant'): AyahReflection | null {
+  const nextState = setReflectionFeedbackLocal(getAyahLensState(), reflectionId, value);
+  setAyahLensState(nextState);
+  return nextState.reflections.find((item) => item.id === reflectionId) ?? null;
+}
+
+async function showAlternateAyahById(reflectionId: string): Promise<AyahReflection | null> {
+  const state = getAyahLensState();
+  const original = state.reflections.find((item) => item.id === reflectionId);
+  if (!original?.rankedCandidateVerseKeys?.length) return null;
+
+  const groupId = original.alternateGroupId ?? original.id;
+  const usedVerseKeys = new Set(
+    state.reflections
+      .filter((item) => item.alternateGroupId === groupId || item.id === reflectionId)
+      .map((item) => item.verseKey),
+  );
+  const nextVerseKey = original.rankedCandidateVerseKeys.find((verseKey) => !usedVerseKeys.has(verseKey));
+  if (!nextVerseKey) return null;
+
+  const candidateIndex = original.rankedCandidateVerseKeys.indexOf(nextVerseKey);
+  const candidate = rankAyahCandidates({
+    summary: original.screenSummary,
+    category: original.themes[0]?.id ?? 'unclear',
+    themes: original.themes,
+    overallConfidence: Math.max(...original.themes.map((theme) => theme.confidence), 0.5),
+    isSensitive: false,
+  }, [], getFeedbackSignals(state)).find((item) => item.verseKey === nextVerseKey);
+  if (!candidate) return null;
+
+  const verse = await fetchVerseContentForReflection(nextVerseKey);
+  const alternateReflection = buildAyahReflection(
+    verse,
+    candidate,
+    {
+      summary: original.screenSummary,
+      category: original.themes[0]?.id ?? 'unclear',
+      themes: original.themes,
+      overallConfidence: Math.max(...original.themes.map((theme) => theme.confidence), 0.5),
+      isSensitive: false,
+    },
+    original.rankedCandidateVerseKeys,
+    candidateIndex,
+    groupId,
+  );
+  const nextState = saveReflectionLocally(getAyahLensState(), alternateReflection);
+  setAyahLensState(nextState);
+  return alternateReflection;
+}
+
+function getAyahDaySummary(): AyahDaySummary {
+  const date = getTodayDateKey();
+  const start = new Date(`${date}T00:00:00.000Z`).getTime();
+  const end = start + 24 * 60 * 60 * 1000;
+  const reflections = getAyahLensState().reflections.filter((reflection) => (
+    reflection.createdAt >= start && reflection.createdAt < end
+  ));
+  const themeCounts = new Map<string, number>();
+  for (const reflection of reflections) {
+    for (const theme of reflection.themes) {
+      themeCounts.set(theme.id, (themeCounts.get(theme.id) ?? 0) + 1);
+    }
+  }
+
+  return {
+    date,
+    reflectionCount: reflections.length,
+    savedCount: reflections.filter((reflection) => reflection.savedAt).length,
+    noteCount: reflections.filter((reflection) => reflection.note?.body).length,
+    themes: [...themeCounts.entries()].map(([id, count]) => ({ id: id as AyahDaySummary['themes'][number]['id'], count })),
+    reflections: reflections.map((reflection) => ({
+      id: reflection.id,
+      verseKey: reflection.verseKey,
+      surahName: reflection.surahName,
+      reflection: reflection.reflection,
+      note: reflection.note?.body,
+    })),
+  };
+}
+
+async function getQuranStreakSummary(): Promise<QuranStreakSummary> {
+  const accessToken = await getQuranUserAccessToken();
+  if (!accessToken) {
+    return { currentDays: null, recordedToday: false, syncState: 'unavailable' };
+  }
+
+  try {
+    const currentDays = await getQuranClient().getCurrentStreakDays(accessToken, getUserTimezone());
+    return {
+      currentDays,
+      recordedToday: getAyahLensState().pendingSync.every((item) => item.action !== 'activity'),
+      syncState: 'synced',
+    };
+  } catch {
+    return {
+      currentDays: null,
+      recordedToday: false,
+      syncState: 'pending',
+      error: 'Quran Foundation streaks are unavailable right now.',
+    };
+  }
+}
+
+function copyReflectionShareCard(reflectionId: string): boolean {
+  const reflection = getAyahLensState().reflections.find((item) => item.id === reflectionId);
+  if (!reflection) return false;
+
+  const lines = [
+    `${reflection.surahName} ${reflection.verseKey}`,
+    reflection.arabicText,
+    reflection.translation,
+    reflection.note?.body ? `Note: ${reflection.note.body}` : null,
+    'Shared from Ayati - Quran Desktop Companion',
+  ].filter(Boolean);
+  clipboard.writeText(lines.join('\n\n'));
+  return true;
 }
 
 function updateAyahLensSetting(key: string, value: unknown): AyahLensSettings {
@@ -475,6 +915,18 @@ function updateAyahLensSetting(key: string, value: unknown): AyahLensSettings {
     preferences.nudgeCooldownMinutes = value;
   } else if (key === 'maxNudgesPerDay' && typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 48) {
     preferences.maxNudgesPerDay = value;
+  } else if (key === 'timedReminders' && typeof value === 'boolean') {
+    preferences.timedReminders = value;
+  } else if (key === 'timedReminderMinutes' && typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1440) {
+    preferences.timedReminderMinutes = value;
+  } else if (key === 'tafsirResourceId' && (value === null || (typeof value === 'number' && Number.isInteger(value) && value > 0))) {
+    preferences.tafsirResourceId = value;
+  } else if (key === 'tafsirResourceName' && (value === null || typeof value === 'string')) {
+    preferences.tafsirResourceName = value;
+  } else if (key === 'recitationId' && (value === null || (typeof value === 'number' && Number.isInteger(value) && value > 0))) {
+    preferences.recitationId = value;
+  } else if (key === 'reciterName' && (value === null || typeof value === 'string')) {
+    preferences.reciterName = value;
   } else {
     throw new Error('Unknown or invalid Ayati - Quran Desktop Companion setting.');
   }
@@ -486,8 +938,10 @@ function updateAyahLensSetting(key: string, value: unknown): AyahLensSettings {
 // Idle detection state
 let lastActivityTime = Date.now();
 let idleCheckInterval: NodeJS.Timeout | null = null;
+let timedQuranReminderInterval: NodeJS.Timeout | null = null;
 let isCapturingAyahReflection = false;
 const IDLE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+const DEFAULT_TIMED_QURAN_REMINDER_MINUTES = 15;
 
 // Pet movement animation state
 let moveAnimation: NodeJS.Timeout | null = null;
@@ -576,7 +1030,7 @@ interface PetAction {
   duration?: number;
 }
 
-type WorkspaceType = 'clawster';
+type WorkspaceType = 'ayati';
 type WorkspaceErrorCode = 'missing_workspace' | 'path_not_found' | 'outside_workspace' | 'not_directory' | 'open_failed';
 type WorkspacePreviewKind = 'markdown' | 'image' | 'json';
 type WorkspacePreviewErrorCode =
@@ -629,7 +1083,7 @@ const MAX_JSON_PREVIEW_BYTES = 1024 * 1024 * 2;
 
 function getCurrentWorkspaceType(): WorkspaceType | null {
   const workspaceType = store.get('onboarding.workspaceType');
-  return workspaceType === 'clawster' ? workspaceType : null;
+  return workspaceType === 'ayati' ? workspaceType : null;
 }
 
 function getDefaultAyahLensWorkspacePath(): string {
@@ -637,10 +1091,10 @@ function getDefaultAyahLensWorkspacePath(): string {
 }
 
 function resolveWorkspaceRootPath(workspaceType: WorkspaceType | null): { workspaceType: WorkspaceType; workspacePath: string } {
-  const workspacePath = (store.get('onboarding.clawsterWorkspacePath') as string | null)
+  const workspacePath = (store.get('onboarding.ayatiWorkspacePath') as string | null)
     ?? getDefaultAyahLensWorkspacePath();
   return {
-    workspaceType: workspaceType ?? 'clawster',
+    workspaceType: workspaceType ?? 'ayati',
     workspacePath,
   };
 }
@@ -812,7 +1266,7 @@ async function transcodeImagePreviewToPngBuffer(filePath: string, sourceBuffer: 
       throw error;
     }
 
-    const outputPath = path.join(os.tmpdir(), `clawster-workspace-preview-${randomUUID()}.png`);
+    const outputPath = path.join(os.tmpdir(), `ayati-workspace-preview-${randomUUID()}.png`);
 
     try {
       await execFileAsync('/usr/bin/sips', ['-s', 'format', 'png', filePath, '--out', outputPath]);
@@ -932,7 +1386,7 @@ function resetOnboardingState(): void {
   store.set('onboarding.completed', false);
   store.set('onboarding.skipped', false);
   store.set('onboarding.workspaceType', null);
-  store.set('onboarding.clawsterWorkspacePath', null);
+  store.set('onboarding.ayatiWorkspacePath', null);
   store.set('onboarding.memoryMigrated', false);
 }
 
@@ -1370,7 +1824,7 @@ async function captureScreenNative(): Promise<string | null> {
     return null;
   }
 
-  const tempPath = path.join(os.tmpdir(), `clawster-screenshot-${Date.now()}.png`);
+  const tempPath = path.join(os.tmpdir(), `ayati-screenshot-${Date.now()}.png`);
 
   try {
     // Use macOS screencapture command - much faster than desktopCapturer
@@ -1621,6 +2075,75 @@ async function maybeSendContextualQuranNudge(
   resetInteractionTimer();
   petWindow.webContents.send('chat-popup', result.message);
   return true;
+}
+
+async function maybeSendTimedQuranReminder(options: { force?: boolean } = {}): Promise<boolean> {
+  if (
+    !petWindow
+    || tutorialManager?.getStatus().isActive
+    || isCapturingAyahReflection
+    || (!options.force && hasActiveConversationSurface())
+  ) {
+    return false;
+  }
+
+  const state = getAyahLensState();
+  const reminderSettings = options.force
+    ? { ...state.preferences, timedReminders: true }
+    : state.preferences;
+  const reminderNudgeState = options.force
+    ? { ...state.nudgeState, lastTimedReminderAt: null }
+    : state.nudgeState;
+  let result: Awaited<ReturnType<typeof buildTimedQuranReminder>>;
+  try {
+    result = await buildTimedQuranReminder({
+      now: Date.now(),
+      settings: reminderSettings,
+      nudgeState: reminderNudgeState,
+      recentVerseKeys: state.recentVerseKeys,
+      fetchVerseContent: fetchVerseContentForReflection,
+    });
+  } catch (error) {
+    const message = getSafeErrorMessage(error);
+    console.error('[Ayati - Quran Desktop Companion] Failed to build timed Quran reminder:', error);
+    petWindow.webContents.send('chat-popup', {
+      id: randomUUID(),
+      text: `Quran Foundation error: ${message}`,
+      trigger: 'timer',
+      quickReplies: ['Got it', 'Not now'],
+    });
+    return false;
+  }
+
+  if (!result) return false;
+
+  const nextState = saveReflectionLocally({
+    ...getAyahLensState(),
+    nudgeState: result.nextState,
+  }, result.reflection);
+  setAyahLensState(nextState);
+  resetInteractionTimer();
+  petWindow.webContents.send('chat-popup', result.message);
+  return true;
+}
+
+function stopTimedQuranReminders(): void {
+  if (!timedQuranReminderInterval) return;
+  clearInterval(timedQuranReminderInterval);
+  timedQuranReminderInterval = null;
+}
+
+function scheduleTimedQuranReminders(): void {
+  stopTimedQuranReminders();
+
+  const { timedReminders, timedReminderMinutes } = getAyahLensState().preferences;
+  if (!timedReminders) return;
+
+  const intervalMinutes = Math.max(1, Math.min(1440, timedReminderMinutes || DEFAULT_TIMED_QURAN_REMINDER_MINUTES));
+  timedQuranReminderInterval = setInterval(() => {
+    void maybeSendTimedQuranReminder();
+  }, intervalMinutes * 60 * 1000);
+  timedQuranReminderInterval.unref?.();
 }
 
 // Start idle detection
@@ -2488,6 +3011,7 @@ function startMainApp() {
   });
 
   watchers.start();
+  scheduleTimedQuranReminders();
 
   // Start idle detection
   startIdleDetection();
@@ -2667,6 +3191,10 @@ function setupIPC() {
     return true;
   });
 
+  ipcMain.handle('dev-force-timed-reminder-comment', async () => {
+    return maybeSendTimedQuranReminder({ force: true });
+  });
+
   // Toggle chatbar window
   ipcMain.on('toggle-chatbar', () => {
     toggleChatbarWindow();
@@ -2744,6 +3272,41 @@ function setupIPC() {
 
   ipcMain.handle('preview-workspace-file', (_event, relativePath: string = '') => {
     return previewWorkspaceFile(relativePath);
+  });
+
+  ipcMain.handle(UPDATE_GET_STATE_CHANNEL, () => updateState);
+
+  ipcMain.handle(UPDATE_CHECK_CHANNEL, async () => {
+    if (!updaterConfigured) {
+      return {
+        checked: false,
+        state: updateState,
+      } satisfies DesktopUpdateCheckResult;
+    }
+
+    const checked = await checkForUpdates('assistant');
+    return {
+      checked,
+      state: updateState,
+    } satisfies DesktopUpdateCheckResult;
+  });
+
+  ipcMain.handle(UPDATE_DOWNLOAD_CHANNEL, async () => {
+    const result = await downloadAvailableUpdate();
+    return {
+      accepted: result.accepted,
+      completed: result.completed,
+      state: updateState,
+    } satisfies DesktopUpdateActionResult;
+  });
+
+  ipcMain.handle(UPDATE_INSTALL_CHANNEL, async () => {
+    const result = await installDownloadedUpdate();
+    return {
+      accepted: result.accepted,
+      completed: result.completed,
+      state: updateState,
+    } satisfies DesktopUpdateActionResult;
   });
 
   // Get settings
@@ -2888,13 +3451,84 @@ function setupIPC() {
     return true;
   });
 
+  ipcMain.handle('ayah-tafsir', async (_event, reflectionId: string) => {
+    if (typeof reflectionId !== 'string' || !reflectionId.trim()) return null;
+    return await getAyahTafsirById(reflectionId);
+  });
+
+  ipcMain.handle('ayah-audio', async (_event, reflectionId: string) => {
+    if (typeof reflectionId !== 'string' || !reflectionId.trim()) return null;
+    return await getAyahAudioById(reflectionId);
+  });
+
+  ipcMain.handle('ayah-save-note', async (_event, reflectionId: string, body: string) => {
+    if (typeof reflectionId !== 'string' || !reflectionId.trim() || typeof body !== 'string') return null;
+    return await saveAyahReflectionNoteById(reflectionId, body);
+  });
+
+  ipcMain.handle('ayah-collections', async () => {
+    return await getAyahCollections();
+  });
+
+  ipcMain.handle('ayah-create-collection', async (_event, name: string) => {
+    if (typeof name !== 'string' || !name.trim()) {
+      throw new Error('Collection name is required.');
+    }
+    return await createAyahCollection(name);
+  });
+
+  ipcMain.handle('ayah-add-to-collection', async (_event, reflectionId: string, collectionId: string) => {
+    if (
+      typeof reflectionId !== 'string'
+      || !reflectionId.trim()
+      || typeof collectionId !== 'string'
+      || !collectionId.trim()
+    ) {
+      return null;
+    }
+    return await addReflectionToCollectionById(reflectionId, collectionId);
+  });
+
+  ipcMain.handle('ayah-feedback', (_event, reflectionId: string, value: string) => {
+    if (
+      typeof reflectionId !== 'string'
+      || !reflectionId.trim()
+      || (value !== 'relevant' && value !== 'not_relevant')
+    ) {
+      return null;
+    }
+    return setReflectionFeedbackById(reflectionId, value);
+  });
+
+  ipcMain.handle('ayah-alternate', async (_event, reflectionId: string) => {
+    if (typeof reflectionId !== 'string' || !reflectionId.trim()) return null;
+    return await showAlternateAyahById(reflectionId);
+  });
+
+  ipcMain.handle('ayah-day-summary', () => {
+    return getAyahDaySummary();
+  });
+
+  ipcMain.handle('ayah-streak-summary', async () => {
+    return await getQuranStreakSummary();
+  });
+
+  ipcMain.handle('ayah-copy-share-card', (_event, reflectionId: string) => {
+    if (typeof reflectionId !== 'string' || !reflectionId.trim()) return false;
+    return copyReflectionShareCard(reflectionId);
+  });
+
   ipcMain.handle('ayah-settings-get', () => {
     return getAyahLensState().preferences;
   });
 
   ipcMain.handle('ayah-settings-update', (_event, key: string, value: unknown) => {
     try {
-      return updateAyahLensSetting(key, value);
+      const nextSettings = updateAyahLensSetting(key, value);
+      if (key === 'timedReminders' || key === 'timedReminderMinutes') {
+        scheduleTimedQuranReminders();
+      }
+      return nextSettings;
     } catch {
       return getAyahLensState().preferences;
     }
@@ -3178,6 +3812,18 @@ function setupIPC() {
     return true;
   });
 
+  ipcMain.on('onboarding-minimize', () => {
+    onboardingWindow?.minimize();
+  });
+
+  ipcMain.on('onboarding-maximize', () => {
+    if (onboardingWindow?.isMaximized()) {
+      onboardingWindow.unmaximize();
+    } else {
+      onboardingWindow?.maximize();
+    }
+  });
+
   // Reset onboarding (for testing)
   ipcMain.handle('reset-onboarding', () => {
     resetOnboardingState();
@@ -3210,11 +3856,11 @@ function setupIPC() {
     store.set('tutorial.completedAt', null);
     store.set('tutorial.lastStep', 0);
     store.set('tutorial.wasInterrupted', false);
-    store.set('onboarding.workspaceType', 'clawster');
-    const workspacePath = (store.get('onboarding.clawsterWorkspacePath') as string | null)
+    store.set('onboarding.workspaceType', 'ayati');
+    const workspacePath = (store.get('onboarding.ayatiWorkspacePath') as string | null)
       ?? getDefaultAyahLensWorkspacePath();
     fs.mkdirSync(workspacePath, { recursive: true });
-    store.set('onboarding.clawsterWorkspacePath', workspacePath);
+    store.set('onboarding.ayatiWorkspacePath', workspacePath);
     store.set('onboarding.memoryMigrated', false);
     const provider = normalizeClawBotProvider(data.aiProvider);
     const model = data.gatewayModel?.trim() || getDefaultClawBotModel(provider);
@@ -3420,53 +4066,230 @@ function registerConfiguredHotkey(key: string, fallback: string, callback: () =>
   return accelerator;
 }
 
+function readAppUpdateYml(): Record<string, string> | null {
+  try {
+    const ymlPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app-update.yml')
+      : path.join(app.getAppPath(), 'dev-app-update.yml');
+    const raw = fs.readFileSync(ymlPath, 'utf8');
+    const entries: Record<string, string> = {};
+    for (const line of raw.split('\n')) {
+      const match = line.match(/^(\w+):\s*(.+)$/);
+      if (match?.[1] && match[2]) {
+        entries[match[1]] = match[2].trim();
+      }
+    }
+    return entries.provider ? entries : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasUpdateFeedConfig(): boolean {
+  return readAppUpdateYml() !== null || Boolean(process.env.AYATI_MOCK_UPDATE_URL);
+}
+
+function resolveAutoUpdateDisabledReason(): string | null {
+  return getAutoUpdateDisabledReason({
+    isDevelopment: isDev,
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    appImage: process.env.APPIMAGE,
+    hasUpdateFeedConfig: hasUpdateFeedConfig(),
+  });
+}
+
+function emitUpdateState(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
+    window.webContents.send(UPDATE_STATE_CHANNEL, updateState);
+  }
+}
+
+function setUpdateState(nextState: DesktopUpdateState): void {
+  updateState = nextState;
+  emitUpdateState();
+}
+
+function stopAutoUpdaterTimers(): void {
+  if (updateStartupTimer) {
+    clearTimeout(updateStartupTimer);
+    updateStartupTimer = null;
+  }
+  if (updatePollTimer) {
+    clearInterval(updatePollTimer);
+    updatePollTimer = null;
+  }
+}
+
+function getUpdateErrorContext(): DesktopUpdateState['errorContext'] {
+  if (updateInstallInFlight) return 'install';
+  if (updateDownloadInFlight) return 'download';
+  if (updateCheckInFlight) return 'check';
+  return updateState.errorContext;
+}
+
+async function checkForUpdates(reason: string): Promise<boolean> {
+  if (!updaterConfigured || updateCheckInFlight) return false;
+  if (updateState.status === 'downloading' || updateState.status === 'downloaded') {
+    console.log(`[AutoUpdater] Skipping update check (${reason}) while ${updateState.status}`);
+    return false;
+  }
+
+  updateCheckInFlight = true;
+  setUpdateState(reduceUpdateStateOnCheckStart(updateState, new Date().toISOString()));
+  console.log(`[AutoUpdater] Checking for updates (${reason})...`);
+
+  try {
+    await autoUpdater.checkForUpdates();
+    return true;
+  } catch (error) {
+    const message = getSafeErrorMessage(error);
+    setUpdateState(reduceUpdateStateOnCheckFailure(updateState, message, new Date().toISOString()));
+    console.error('[AutoUpdater] Failed to check for updates:', error);
+    return true;
+  } finally {
+    updateCheckInFlight = false;
+  }
+}
+
+async function downloadAvailableUpdate(): Promise<{ accepted: boolean; completed: boolean }> {
+  if (!updaterConfigured || updateDownloadInFlight || updateState.status !== 'available') {
+    return { accepted: false, completed: false };
+  }
+
+  updateDownloadInFlight = true;
+  autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
+  setUpdateState(reduceUpdateStateOnDownloadStart(updateState));
+
+  try {
+    await autoUpdater.downloadUpdate();
+    return { accepted: true, completed: true };
+  } catch (error) {
+    const message = getSafeErrorMessage(error);
+    setUpdateState(reduceUpdateStateOnDownloadFailure(updateState, message));
+    console.error('[AutoUpdater] Failed to download update:', error);
+    return { accepted: true, completed: false };
+  } finally {
+    updateDownloadInFlight = false;
+  }
+}
+
+async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed: boolean }> {
+  if (!updaterConfigured || updateInstallInFlight || updateState.status !== 'downloaded') {
+    return { accepted: false, completed: false };
+  }
+
+  updateInstallInFlight = true;
+  stopAutoUpdaterTimers();
+
+  try {
+    autoUpdater.quitAndInstall(false, true);
+    return { accepted: true, completed: false };
+  } catch (error) {
+    const message = getSafeErrorMessage(error);
+    updateInstallInFlight = false;
+    setUpdateState(reduceUpdateStateOnInstallFailure(updateState, message));
+    console.error('[AutoUpdater] Failed to install update:', error);
+    return { accepted: true, completed: false };
+  }
+}
+
 // Auto-updater setup
 function setupAutoUpdater() {
-  if (isDev) {
-    console.log('[AutoUpdater] Skipping in dev mode');
+  const disabledReason = resolveAutoUpdateDisabledReason();
+  const enabled = disabledReason === null;
+  setUpdateState(createConfiguredUpdateState(app.getVersion(), desktopRuntimeInfo, enabled, disabledReason));
+
+  if (!enabled) {
+    console.log(`[AutoUpdater] Disabled: ${disabledReason}`);
     return;
   }
 
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  if (process.env.AYATI_MOCK_UPDATE_URL) {
+    autoUpdater.setFeedURL({
+      provider: 'generic',
+      url: process.env.AYATI_MOCK_UPDATE_URL,
+    });
+  }
+
+  updaterConfigured = true;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
+
+  let lastLoggedDownloadMilestone = -1;
 
   autoUpdater.on('checking-for-update', () => {
-    console.log('[AutoUpdater] Checking for updates...');
+    console.log('[AutoUpdater] Looking for updates...');
   });
 
   autoUpdater.on('update-available', (info) => {
+    setUpdateState(
+      reduceUpdateStateOnUpdateAvailable(updateState, info.version, new Date().toISOString()),
+    );
+    lastLoggedDownloadMilestone = -1;
     console.log('[AutoUpdater] Update available:', info.version);
   });
 
   autoUpdater.on('update-not-available', () => {
+    setUpdateState(reduceUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
+    lastLoggedDownloadMilestone = -1;
     console.log('[AutoUpdater] No updates available');
   });
 
   autoUpdater.on('download-progress', (progress) => {
-    console.log(`[AutoUpdater] Download progress: ${progress.percent.toFixed(1)}%`);
+    const percent = Math.floor(progress.percent);
+    if (shouldBroadcastDownloadProgress(updateState, progress.percent) || updateState.message !== null) {
+      setUpdateState(reduceUpdateStateOnDownloadProgress(updateState, progress.percent));
+    }
+
+    const milestone = percent - (percent % 10);
+    if (milestone > lastLoggedDownloadMilestone) {
+      lastLoggedDownloadMilestone = milestone;
+      console.log(`[AutoUpdater] Download progress: ${percent}%`);
+    }
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    setUpdateState(reduceUpdateStateOnDownloadComplete(updateState, info.version));
     console.log('[AutoUpdater] Update downloaded:', info.version);
-    dialog.showMessageBox({
-      type: 'info',
-      title: 'Update Ready',
-      message: `Ayati - Quran Desktop Companion ${info.version} is ready to install.`,
-      detail: 'The update will be installed when you restart the app.',
-      buttons: ['Restart Now', 'Later'],
-    }).then((result) => {
-      if (result.response === 0) {
-        autoUpdater.quitAndInstall();
-      }
-    });
   });
 
   autoUpdater.on('error', (error) => {
+    const message = getSafeErrorMessage(error);
+    if (updateInstallInFlight) {
+      updateInstallInFlight = false;
+      setUpdateState(reduceUpdateStateOnInstallFailure(updateState, message));
+      console.error('[AutoUpdater] Install error:', error);
+      return;
+    }
+
+    if (!updateCheckInFlight && !updateDownloadInFlight) {
+      setUpdateState({
+        ...updateState,
+        status: 'error',
+        message,
+        checkedAt: new Date().toISOString(),
+        downloadPercent: null,
+        errorContext: getUpdateErrorContext(),
+        canRetry: updateState.availableVersion !== null || updateState.downloadedVersion !== null,
+      });
+    }
     console.error('[AutoUpdater] Error:', error);
   });
 
-  // Check for updates
-  autoUpdater.checkForUpdatesAndNotify();
+  stopAutoUpdaterTimers();
+  updateStartupTimer = setTimeout(() => {
+    updateStartupTimer = null;
+    void checkForUpdates('startup');
+  }, AUTO_UPDATE_STARTUP_DELAY_MS);
+  updateStartupTimer.unref?.();
+
+  updatePollTimer = setInterval(() => {
+    void checkForUpdates('poll');
+  }, AUTO_UPDATE_POLL_INTERVAL_MS);
+  updatePollTimer.unref?.();
 }
 
 // Setup system tray
@@ -3603,6 +4426,8 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   watchers?.stop();
+  stopAutoUpdaterTimers();
+  stopTimedQuranReminders();
   stopIdleBehaviors();
   if (idleCheckInterval) {
     clearInterval(idleCheckInterval);

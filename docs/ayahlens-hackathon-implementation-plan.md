@@ -8,17 +8,17 @@ The chosen API scope is **Real OAuth MVP**: implement Quran Foundation Content A
 
 ## Grounded Repo Facts
 
-- App lives in nested git repo: [`clawster`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster)
+- App lives in nested git repo: [`ayati`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati)
 - PRD lives at [`docs/prd.md`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/docs/prd.md)
 - No codebase map exists yet, so implementation must start by creating [`docs/CODEBASE_MAP.md`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/docs/CODEBASE_MAP.md)
 - Current stack: Electron 28, React 18, Vite 5, TypeScript strict mode, Tailwind 3, `electron-store`, `@iconify/react`
 - There is no existing test harness
 - Existing reusable seams:
-  - Screenshot capture: [`main.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/main/main.ts)
-  - IPC bridge: [`preload.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/main/preload.ts)
-  - Persistent store: [`store.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/main/store.ts)
-  - Assistant panel: [`Assistant.tsx`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/renderer/assistant/Assistant.tsx)
-  - Screenshot flow: [`ScreenshotQuestion.tsx`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/renderer/screenshot-question/ScreenshotQuestion.tsx)
+  - Screenshot capture: [`main.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/main/main.ts)
+  - IPC bridge: [`preload.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/main/preload.ts)
+  - Persistent store: [`store.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/main/store.ts)
+  - Assistant panel: [`Assistant.tsx`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/renderer/assistant/Assistant.tsx)
+  - Screenshot flow: [`ScreenshotQuestion.tsx`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/renderer/screenshot-question/ScreenshotQuestion.tsx)
 
 ## Hackathon Constraints
 
@@ -87,7 +87,7 @@ Defer:
 
 ### Main Process
 
-Add these modules under [`src/main`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/main):
+Add these modules under [`src/main`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/main):
 
 - `quran-foundation-client.ts`
   - Handles OAuth token exchange, refresh, Content API calls, User API calls
@@ -139,11 +139,11 @@ Add/modify these surfaces:
   - Default capture behavior
   - Privacy copy: screenshots are temporary unless enabled later
 
-- Keep existing `window.clawster` global name for minimal churn, but add Ayati - Quran Desktop Companion-specific methods.
+- Keep existing `window.ayati` global name for minimal churn, but add Ayati - Quran Desktop Companion-specific methods.
 
 ## Public Interfaces And Types
 
-Update [`preload.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/main/preload.ts) and [`vite-env.d.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/renderer/vite-env.d.ts) with:
+Update [`preload.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/main/preload.ts) and [`vite-env.d.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/renderer/vite-env.d.ts) with:
 
 ```ts
 type AyahTheme =
@@ -197,7 +197,7 @@ interface QuranAuthStatus {
 }
 ```
 
-Add `window.clawster` methods:
+Add `window.ayati` methods:
 
 ```ts
 startQuranOAuth(): Promise<{ authorizeUrl: string }>;
@@ -214,7 +214,7 @@ getAyahLensSettings(): Promise<AyahLensSettings>;
 updateAyahLensSetting(key: string, value: unknown): Promise<AyahLensSettings>;
 ```
 
-Update [`store.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/main/store.ts):
+Update [`store.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/main/store.ts):
 
 ```ts
 ayahLens: {
@@ -275,7 +275,7 @@ Defaults:
 
 - Create [`docs/CODEBASE_MAP.md`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/docs/CODEBASE_MAP.md)
 - Record main/renderer/shared entrypoints and Ayati - Quran Desktop Companion implementation areas
-- Work in nested repo [`clawster`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster)
+- Work in nested repo [`ayati`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati)
 - Create branch `feature/ayahlens-hackathon`
 
 ### Phase 1: Test Harness First
@@ -363,7 +363,7 @@ Acceptance:
 
 ### Phase 5: IPC And Store Integration
 
-Add IPC handlers in [`main.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/main/main.ts):
+Add IPC handlers in [`main.ts`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/main/main.ts):
 
 - `quran-auth-status`
 - `quran-auth-start`
@@ -387,8 +387,8 @@ Acceptance:
 
 Modify:
 
-- [`ScreenshotQuestion.tsx`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/renderer/screenshot-question/ScreenshotQuestion.tsx)
-- [`Assistant.tsx`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/clawster/src/renderer/assistant/Assistant.tsx)
+- [`ScreenshotQuestion.tsx`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/renderer/screenshot-question/ScreenshotQuestion.tsx)
+- [`Assistant.tsx`](/Users/mikhail/Desktop/Ayati - Quran Desktop Companion/ayati/src/renderer/assistant/Assistant.tsx)
 - related CSS files
 
 UI decisions:
@@ -425,7 +425,7 @@ Update user-facing product copy:
 - screenshot prompts
 - README hackathon section
 
-Keep internal symbol names like `window.clawster` unless changing them is required for visible output. This limits risk before the hackathon.
+Keep internal symbol names like `window.ayati` unless changing them is required for visible output. This limits risk before the hackathon.
 
 ### Phase 8: Submission Assets
 
@@ -514,7 +514,7 @@ Add docs for judges:
 - Screenshots are never persisted by default.
 - Save action maps to Quran Foundation bookmark creation first; collections are secondary if endpoint access is stable during implementation.
 - Existing mascot/window mechanics are reused for speed; visible copy is rebranded.
-- Internal `window.clawster` API name remains for implementation safety.
+- Internal `window.ayati` API name remains for implementation safety.
 - Add Vitest test harness because no existing test setup is present.
 - Use `npm` because the repo has `package-lock.json`.
 - Do not add new UI icon dependencies; use existing `@iconify/react`.

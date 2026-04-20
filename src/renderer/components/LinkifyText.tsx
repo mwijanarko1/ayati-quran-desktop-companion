@@ -23,7 +23,7 @@ export const LinkifyText: React.FC<LinkifyTextProps> = ({ text }) => {
               className="message-link"
               onClick={(e) => {
                 e.preventDefault();
-                window.clawster.openExternal(part);
+                window.ayati.openExternal(part);
               }}
             >
               {part}

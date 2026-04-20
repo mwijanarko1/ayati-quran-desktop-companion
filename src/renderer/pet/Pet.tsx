@@ -302,7 +302,7 @@ export const Pet: React.FC = () => {
 
     setWakeWindowFlightActive(true);
     if (!shouldReduceMotion()) {
-      void window.clawster.playPetWakeFlight().catch((error) => {
+      void window.ayati.playPetWakeFlight().catch((error) => {
         console.warn('[Pet] Failed to play wake window flight:', error);
       });
     }
@@ -329,8 +329,8 @@ export const Pet: React.FC = () => {
 
       try {
         const [cursor, petPos] = await Promise.all([
-          window.clawster.getCursorPosition(),
-          window.clawster.getPetPosition(),
+          window.ayati.getCursorPosition(),
+          window.ayati.getPetPosition(),
         ]);
 
         const petCenterX = petPos[0] + PET_SIZE / 2;
@@ -361,7 +361,7 @@ export const Pet: React.FC = () => {
 
   // Handle mood updates from ClawBot
   useEffect(() => {
-    window.clawster.getSettings().then((settings) => {
+    window.ayati.getSettings().then((settings) => {
       const typedSettings = settings as {
         pet?: { transparentWhenSleeping?: boolean };
         dev?: { showPetModeOverlay?: boolean };
@@ -372,21 +372,21 @@ export const Pet: React.FC = () => {
       setShowModeOverlay(Boolean(devSettings?.showPetModeOverlay));
     });
 
-    window.clawster.onClawbotMood((data: unknown) => {
+    window.ayati.onClawbotMood((data: unknown) => {
       const moodData = data as { state: Mood; reason?: string };
       if (!canApplyMoodUpdate(moodData.state)) return;
       setPetMood(moodData.state);
     });
 
-    window.clawster.onPetTransparentSleepChanged((enabled: boolean) => {
+    window.ayati.onPetTransparentSleepChanged((enabled: boolean) => {
       setTransparentWhenSleeping(enabled);
     });
-    window.clawster.onDevShowPetModeOverlayChanged((enabled: boolean) => {
+    window.ayati.onDevShowPetModeOverlayChanged((enabled: boolean) => {
       setShowModeOverlay(enabled);
     });
 
     // Handle chat messages from main process - show in separate window
-    window.clawster.onChatPopup((data: unknown) => {
+    window.ayati.onChatPopup((data: unknown) => {
       const messageData = data as ChatMessage;
       const message = {
         id: messageData.id || crypto.randomUUID(),
@@ -394,25 +394,25 @@ export const Pet: React.FC = () => {
         quickReplies: messageData.quickReplies || DEFAULT_QUICK_REPLIES,
         reflectionId: messageData.reflectionId,
       };
-      window.clawster.showPetChat(message);
+      window.ayati.showPetChat(message);
       if (!sleepLockedRef.current) {
         setPetMood('curious');
       }
     });
 
     // Legacy suggestion support - show in separate window
-    window.clawster.onClawbotSuggestion((data: unknown) => {
+    window.ayati.onClawbotSuggestion((data: unknown) => {
       const suggestionData = data as { text: string; id: string };
       const message = {
         id: suggestionData.id,
         text: suggestionData.text,
         quickReplies: DEFAULT_QUICK_REPLIES,
       };
-      window.clawster.showPetChat(message);
+      window.ayati.showPetChat(message);
     });
 
     // Handle chat reply reactions
-    window.clawster.onPetChatReply((reply: string) => {
+    window.ayati.onPetChatReply((reply: string) => {
       if (sleepLockedRef.current) return;
 
       if (reply === 'thanks') {
@@ -431,7 +431,7 @@ export const Pet: React.FC = () => {
       }
     });
 
-    window.clawster.onActivityEvent((event: unknown) => {
+    window.ayati.onActivityEvent((event: unknown) => {
       if (sleepLockedRef.current) return;
 
       const activityEvent = event as { type: string };
@@ -447,7 +447,7 @@ export const Pet: React.FC = () => {
     });
 
     // Listen for pet movement events
-    window.clawster.onPetMoving((data) => {
+    window.ayati.onPetMoving((data) => {
       if (sleepLockedRef.current) {
         setIsWalking(false);
         return;
@@ -455,7 +455,7 @@ export const Pet: React.FC = () => {
       setIsWalking(data.moving);
     });
 
-    window.clawster.onPetCameraSnap((data) => {
+    window.ayati.onPetCameraSnap((data) => {
       if (sleepLockedRef.current) return;
 
       const captureAtMs = Math.max(0, data.captureAtMs || 0);
@@ -488,7 +488,7 @@ export const Pet: React.FC = () => {
     });
 
     // Listen for idle behaviors
-    window.clawster.onIdleBehavior((data) => {
+    window.ayati.onIdleBehavior((data) => {
       if (sleepLockedRef.current) return;
 
       const idleData = data as { type?: string; direction?: string };
@@ -497,15 +497,15 @@ export const Pet: React.FC = () => {
     });
 
     // Listen for tutorial events
-    window.clawster.onTutorialStep(() => {
+    window.ayati.onTutorialStep(() => {
       setTutorialActive(true);
     });
 
-    window.clawster.onTutorialEnded(() => {
+    window.ayati.onTutorialEnded(() => {
       setTutorialActive(false);
     });
 
-    window.clawster.onTutorialResumePrompt(() => {
+    window.ayati.onTutorialResumePrompt(() => {
       setTutorialActive(true);
     });
 
@@ -525,7 +525,7 @@ export const Pet: React.FC = () => {
       if (wakeWindowFlightTimeoutRef.current) {
         clearTimeout(wakeWindowFlightTimeoutRef.current);
       }
-      window.clawster.removeAllListeners();
+      window.ayati.removeAllListeners();
     };
   }, [canApplyMoodUpdate, playIdleBehavior, setPetMood]);
 
@@ -551,7 +551,7 @@ export const Pet: React.FC = () => {
       }
 
       if (didDragRef.current) {
-        window.clawster.dragPet(deltaX, deltaY);
+        window.ayati.dragPet(deltaX, deltaY);
         dragStart.current = { x: moveEvent.screenX, y: moveEvent.screenY };
       }
     };
@@ -595,13 +595,13 @@ export const Pet: React.FC = () => {
 
     // Notify tutorial if active
     if (tutorialActive) {
-      window.clawster.tutorialPetClicked();
+      window.ayati.tutorialPetClicked();
     }
 
     if (sleepLockedRef.current) {
       setPetMood('idle');
       playWakeWindowFlight();
-      window.clawster.petClicked?.();
+      window.ayati.petClicked?.();
       return;
     }
 
@@ -625,15 +625,15 @@ export const Pet: React.FC = () => {
     }
 
     // Notify main process (optional - for sound effects or other reactions)
-    window.clawster.petClicked?.();
+    window.ayati.petClicked?.();
   }, [playWakeWindowFlight, setPetMood, tutorialActive]);
 
   // Right click = open custom context menu
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     if (!didDragRef.current) {
-      window.clawster.petClicked?.();
-      window.clawster.showPetContextMenu(e.screenX, e.screenY);
+      window.ayati.petClicked?.();
+      window.ayati.showPetContextMenu(e.screenX, e.screenY);
     }
   }, []);
 

@@ -19,7 +19,7 @@ export const PetChat: React.FC = () => {
 
   useEffect(() => {
     // Listen for chat messages from main process
-    window.clawster.onPetChatMessage((msg) => {
+    window.ayati.onPetChatMessage((msg) => {
       setMessage({
         ...msg,
         quickReplies: msg.quickReplies || DEFAULT_QUICK_REPLIES,
@@ -42,7 +42,7 @@ export const PetChat: React.FC = () => {
     }
 
     lastSizeRef.current = { width, height };
-    window.clawster.resizePetChat(width, height);
+    window.ayati.resizePetChat(width, height);
   }, [message]);
 
   useLayoutEffect(() => {
@@ -75,22 +75,22 @@ export const PetChat: React.FC = () => {
     const now = Date.now();
     if (now - lastInteractionSentAtRef.current < 600) return;
     lastInteractionSentAtRef.current = now;
-    window.clawster.petChatInteracted();
+    window.ayati.petChatInteracted();
   }, []);
 
   const handleQuickReply = useCallback(async (reply: string) => {
     if (!message) return;
 
     if (reply === 'Not now') {
-      window.clawster.petChatReply('dismiss');
-      window.clawster.hidePetChat();
+      window.ayati.petChatReply('dismiss');
+      window.ayati.hidePetChat();
       return;
     }
 
     if (reply === 'Reflect') {
-      window.clawster.petChatReply('curious');
-      window.clawster.openAssistant();
-      window.clawster.hidePetChat();
+      window.ayati.petChatReply('curious');
+      window.ayati.openAssistant();
+      window.ayati.hidePetChat();
       return;
     }
 
@@ -105,9 +105,9 @@ export const PetChat: React.FC = () => {
       }
 
       setIsLoading(true);
-      window.clawster.petChatReply('thinking');
+      window.ayati.petChatReply('thinking');
       try {
-        const savedReflection = await window.clawster.saveAyahReflection(message.reflectionId);
+        const savedReflection = await window.ayati.saveAyahReflection(message.reflectionId);
         setMessage({
           id: crypto.randomUUID(),
           text: savedReflection?.syncState === 'synced'
@@ -115,7 +115,7 @@ export const PetChat: React.FC = () => {
             : 'Saved this reflection locally.',
           quickReplies: ['Got it', 'Not now'],
         });
-        window.clawster.petChatReply('happy');
+        window.ayati.petChatReply('happy');
       } catch {
         setMessage({
           id: crypto.randomUUID(),
@@ -130,7 +130,7 @@ export const PetChat: React.FC = () => {
 
     if (reply === 'Tell me more') {
       // Check connection first
-      const status = await window.clawster.getClawbotStatus();
+      const status = await window.ayati.getClawbotStatus();
       if (!status.connected) {
         setMessage({
           id: crypto.randomUUID(),
@@ -141,9 +141,9 @@ export const PetChat: React.FC = () => {
       }
 
       setIsLoading(true);
-      window.clawster.petChatReply('thinking');
+      window.ayati.petChatReply('thinking');
       try {
-        const response = await window.clawster.sendToClawbot(
+        const response = await window.ayati.sendToClawbot(
           `Tell me more about: ${message.text}`
         ) as { text?: string };
 
@@ -153,7 +153,7 @@ export const PetChat: React.FC = () => {
             text: response.text,
             quickReplies: ['Thanks!', 'Not now'],
           });
-          window.clawster.petChatReply('curious');
+          window.ayati.petChatReply('curious');
         }
       } catch {
         setMessage({
@@ -169,14 +169,14 @@ export const PetChat: React.FC = () => {
 
     // "Got it" - just close
     if (reply === 'Got it') {
-      window.clawster.petChatReply('dismiss');
-      window.clawster.hidePetChat();
+      window.ayati.petChatReply('dismiss');
+      window.ayati.hidePetChat();
       return;
     }
 
     // "Thanks!" - close with happy reaction
-    window.clawster.petChatReply('thanks');
-    window.clawster.hidePetChat();
+    window.ayati.petChatReply('thanks');
+    window.ayati.hidePetChat();
   }, [message]);
 
   if (!message) return null;

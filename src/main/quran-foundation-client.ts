@@ -1,6 +1,12 @@
 import { createHash, randomBytes } from 'crypto';
 
-import type { QuranBookmarkResult, QuranVerseContent } from './ayah-types';
+import type {
+  AyahCollection,
+  QuranAudioFile,
+  QuranBookmarkResult,
+  QuranTafsirSnippet,
+  QuranVerseContent,
+} from './ayah-types';
 
 type FetchLike = typeof fetch;
 
@@ -88,6 +94,23 @@ function stripHtml(value: string): string {
     .replace(/<[^>]*>/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function parseVerseKey(verseKey: string): { surah: number; ayah: number } {
+  const [surah, ayah] = verseKey.split(':').map((part) => Number.parseInt(part, 10));
+  if (!Number.isInteger(surah) || !Number.isInteger(ayah)) {
+    throw new QuranFoundationError('invalid_response', 'Ayah reference is invalid.');
+  }
+  return { surah, ayah };
+}
+
+function getSingleAyahRange(verseKey: string): string {
+  return `${verseKey}-${verseKey}`;
+}
+
+function normalizeAudioUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  return new URL(url.replace(/^\/+/, ''), 'https://verses.quran.foundation/').toString();
 }
 
 function decodeJwtPayload(token?: string): Record<string, unknown> | null {
@@ -272,10 +295,7 @@ export class QuranFoundationClient {
     accessToken: string,
     params: { verseKey: string; mushafId: number },
   ): Promise<QuranBookmarkResult> {
-    const [surah, ayah] = params.verseKey.split(':').map((part) => Number.parseInt(part, 10));
-    if (!Number.isInteger(surah) || !Number.isInteger(ayah)) {
-      throw new QuranFoundationError('invalid_response', 'Ayah reference is invalid.');
-    }
+    const { surah, ayah } = parseVerseKey(params.verseKey);
 
     const response = await this.fetchImpl(new URL('/auth/v1/bookmarks', this.apiBaseUrl).toString(), {
       method: 'POST',
@@ -297,6 +317,302 @@ export class QuranFoundationClient {
 
     const payload = await response.json() as { data?: { id?: string } };
     return { bookmarkId: payload.data?.id ?? null };
+  }
+
+  async fetchTafsir(
+    accessToken: string,
+    verseKey: string,
+    resourceId: number,
+  ): Promise<QuranTafsirSnippet> {
+    const url = new URL(
+      `/content/api/v4/tafsirs/${encodeURIComponent(String(resourceId))}/by_ayah/${encodeURIComponent(verseKey)}`,
+      this.apiBaseUrl,
+    );
+    url.searchParams.set('fields', 'resource_name,language_name');
+
+    const response = await this.fetchImpl(url.toString(), {
+      method: 'GET',
+      headers: this.getApiHeaders(accessToken),
+    });
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    const payload = await response.json() as {
+      tafsir?: {
+        resource_id?: number;
+        resource_name?: string;
+        language_name?: string;
+        translated_name?: { language_name?: string };
+        text?: string;
+      };
+    };
+    const tafsir = payload.tafsir;
+    if (typeof tafsir?.text !== 'string' || !tafsir.resource_name) {
+      throw new QuranFoundationError(
+        'invalid_response',
+        'Quran Foundation returned an unexpected tafsir response.',
+      );
+    }
+
+    return {
+      resourceId: tafsir.resource_id ?? resourceId,
+      resourceName: tafsir.resource_name,
+      languageName: tafsir.language_name ?? tafsir.translated_name?.language_name,
+      text: stripHtml(tafsir.text),
+      fetchedAt: Date.now(),
+    };
+  }
+
+  async fetchAyahAudio(
+    accessToken: string,
+    verseKey: string,
+    recitationId: number,
+    reciterName?: string,
+  ): Promise<QuranAudioFile> {
+    const url = new URL(
+      `/content/api/v4/recitations/${encodeURIComponent(String(recitationId))}/by_ayah/${encodeURIComponent(verseKey)}`,
+      this.apiBaseUrl,
+    );
+    url.searchParams.set('fields', 'url,duration,verse_key');
+
+    const response = await this.fetchImpl(url.toString(), {
+      method: 'GET',
+      headers: this.getApiHeaders(accessToken),
+    });
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    const payload = await response.json() as {
+      audio_files?: Array<{ url?: string; duration?: number }>;
+    };
+    const audio = payload.audio_files?.[0];
+    if (!audio?.url) {
+      throw new QuranFoundationError(
+        'invalid_response',
+        'Quran Foundation returned an unexpected recitation response.',
+      );
+    }
+
+    return {
+      recitationId,
+      reciterName,
+      url: normalizeAudioUrl(audio.url),
+      duration: audio.duration,
+      fetchedAt: Date.now(),
+    };
+  }
+
+  async fetchTafsirResources(accessToken: string): Promise<Array<{ id: number; name: string; languageName?: string }>> {
+    const response = await this.fetchImpl(new URL('/content/api/v4/resources/tafsirs', this.apiBaseUrl).toString(), {
+      method: 'GET',
+      headers: this.getApiHeaders(accessToken),
+    });
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    const payload = await response.json() as {
+      tafsirs?: Array<{ id?: number; resource_id?: number; name?: string; resource_name?: string; language_name?: string; translated_name?: { name?: string; language_name?: string } }>;
+    };
+
+    return (payload.tafsirs ?? [])
+      .map((resource) => ({
+        id: resource.id ?? resource.resource_id ?? 0,
+        name: resource.name ?? resource.resource_name ?? resource.translated_name?.name ?? '',
+        languageName: resource.language_name ?? resource.translated_name?.language_name,
+      }))
+      .filter((resource) => Number.isInteger(resource.id) && resource.id > 0 && resource.name);
+  }
+
+  async fetchRecitationResources(accessToken: string): Promise<Array<{ id: number; name: string }>> {
+    const response = await this.fetchImpl(new URL('/content/api/v4/resources/recitations', this.apiBaseUrl).toString(), {
+      method: 'GET',
+      headers: this.getApiHeaders(accessToken),
+    });
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    const payload = await response.json() as {
+      recitations?: Array<{ id?: number; reciter_name?: string; name?: string; translated_name?: { name?: string } }>;
+    };
+
+    return (payload.recitations ?? [])
+      .map((resource) => ({
+        id: resource.id ?? 0,
+        name: resource.reciter_name ?? resource.name ?? resource.translated_name?.name ?? '',
+      }))
+      .filter((resource) => Number.isInteger(resource.id) && resource.id > 0 && resource.name);
+  }
+
+  async createCollection(accessToken: string, name: string): Promise<AyahCollection> {
+    const response = await this.fetchImpl(new URL('/auth/v1/collections', this.apiBaseUrl).toString(), {
+      method: 'POST',
+      headers: {
+        ...this.getApiHeaders(accessToken),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name }),
+    });
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    const payload = await response.json() as { data?: { id?: string; name?: string; slug?: string } };
+    if (!payload.data?.id || !payload.data.name) {
+      throw new QuranFoundationError('invalid_response', 'Quran Foundation returned an unexpected collection response.');
+    }
+
+    return {
+      id: payload.data.id,
+      name: payload.data.name,
+      slug: payload.data.slug,
+      syncState: 'synced',
+    };
+  }
+
+  async listCollections(accessToken: string): Promise<AyahCollection[]> {
+    const response = await this.fetchImpl(new URL('/auth/v1/collections', this.apiBaseUrl).toString(), {
+      method: 'GET',
+      headers: this.getApiHeaders(accessToken),
+    });
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    const payload = await response.json() as { data?: Array<{ id?: string; name?: string; slug?: string }> };
+    return (payload.data ?? [])
+      .filter((collection) => collection.id && collection.name)
+      .map((collection) => ({
+        id: String(collection.id),
+        name: String(collection.name),
+        slug: collection.slug,
+        syncState: 'synced',
+      }));
+  }
+
+  async addCollectionBookmark(
+    accessToken: string,
+    collectionId: string,
+    verseKey: string,
+    mushafId: number,
+  ): Promise<boolean> {
+    const { surah, ayah } = parseVerseKey(verseKey);
+    const response = await this.fetchImpl(
+      new URL(`/auth/v1/collections/${encodeURIComponent(collectionId)}/bookmarks`, this.apiBaseUrl).toString(),
+      {
+        method: 'POST',
+        headers: {
+          ...this.getApiHeaders(accessToken),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          key: surah,
+          verseNumber: ayah,
+          type: 'ayah',
+          mushafId,
+          mushaf: mushafId,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    return true;
+  }
+
+  async createNote(
+    accessToken: string,
+    params: { reflectionId: string; verseKey: string; body: string },
+  ): Promise<string | null> {
+    parseVerseKey(params.verseKey);
+    const response = await this.fetchImpl(new URL('/auth/v1/notes', this.apiBaseUrl).toString(), {
+      method: 'POST',
+      headers: {
+        ...this.getApiHeaders(accessToken),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        body: params.body,
+        saveToQR: false,
+        attachedEntity: {
+          entityId: params.reflectionId,
+          entityType: 'reflection',
+          entityMetadata: { verseKey: params.verseKey },
+        },
+        ranges: [getSingleAyahRange(params.verseKey)],
+      }),
+    });
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    const payload = await response.json() as { data?: { id?: string } };
+    return payload.data?.id ?? null;
+  }
+
+  async recordActivityDay(
+    accessToken: string,
+    params: { verseKey: string; mushafId: number; seconds?: number; timezone?: string },
+  ): Promise<boolean> {
+    parseVerseKey(params.verseKey);
+    const headers: Record<string, string> = {
+      ...this.getApiHeaders(accessToken),
+      'Content-Type': 'application/json',
+    };
+    if (params.timezone) {
+      headers['x-timezone'] = params.timezone;
+    }
+
+    const response = await this.fetchImpl(new URL('/auth/v1/activity-days', this.apiBaseUrl).toString(), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        type: 'QURAN',
+        seconds: params.seconds ?? 30,
+        ranges: [getSingleAyahRange(params.verseKey)],
+        mushafId: params.mushafId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    return true;
+  }
+
+  async getCurrentStreakDays(accessToken: string, timezone?: string): Promise<number | null> {
+    const url = new URL('/auth/v1/streaks/current-streak-days', this.apiBaseUrl);
+    url.searchParams.set('type', 'QURAN');
+    const headers = this.getApiHeaders(accessToken);
+    if (timezone) {
+      headers['x-timezone'] = timezone;
+    }
+
+    const response = await this.fetchImpl(url.toString(), {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    const payload = await response.json() as { data?: { count?: number; days?: number; currentStreakDays?: number } };
+    const value = payload.data?.count ?? payload.data?.days ?? payload.data?.currentStreakDays;
+    return typeof value === 'number' ? value : null;
   }
 
   private async requestToken(

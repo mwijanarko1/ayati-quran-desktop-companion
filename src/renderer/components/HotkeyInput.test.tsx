@@ -11,7 +11,7 @@ describe('HotkeyInput', () => {
       <HotkeyInput
         label="Reflect on Screen"
         description="Capture your screen and receive a fitting ayah"
-        value="CommandOrControl+Shift+/"
+        value="CommandOrControl+Alt+/"
         onChange={onChange}
       />,
     );

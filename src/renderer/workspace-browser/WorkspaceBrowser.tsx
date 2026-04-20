@@ -114,7 +114,7 @@ function getFilePresentation(name: string): { icon: string; tone: WorkspaceFileT
 }
 
 function getWorkspaceTitle(workspaceType: CurrentWorkspaceInfo['workspaceType']): string {
-  if (workspaceType === 'clawster') return 'Ayati - Quran Desktop Companion Workspace';
+  if (workspaceType === 'ayati') return 'Ayati - Quran Desktop Companion Workspace';
   return 'Workspace';
 }
 
@@ -296,7 +296,7 @@ export const WorkspaceBrowser: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const loadWorkspaceInfo = useCallback(async () => {
-    const info = await window.clawster.getCurrentWorkspaceInfo();
+    const info = await window.ayati.getCurrentWorkspaceInfo();
     setWorkspaceInfo(info);
     return info;
   }, []);
@@ -305,7 +305,7 @@ export const WorkspaceBrowser: React.FC = () => {
     setActionError(null);
     setIsLoading(true);
 
-    const result = await window.clawster.listWorkspaceDirectory(nextPath);
+    const result = await window.ayati.listWorkspaceDirectory(nextPath);
 
     if (result.success) {
       setEntries(result.entries);
@@ -326,7 +326,7 @@ export const WorkspaceBrowser: React.FC = () => {
     setActionError(null);
     setIsLoading(true);
 
-    const result = await window.clawster.previewWorkspaceFile(nextPath);
+    const result = await window.ayati.previewWorkspaceFile(nextPath);
     if (result.success && result.previewKind && typeof result.content === 'string') {
       setPreview(result);
       setCurrentPath(result.path);
@@ -349,7 +349,7 @@ export const WorkspaceBrowser: React.FC = () => {
 
   const handleOpenPath = useCallback(async (path: string) => {
     setActionError(null);
-    const result = await window.clawster.openWorkspacePath(path);
+    const result = await window.ayati.openWorkspacePath(path);
     if (!result.success) {
       setActionError(result.message || getErrorMessage(result.error));
     }
@@ -357,7 +357,7 @@ export const WorkspaceBrowser: React.FC = () => {
 
   const handleRevealPath = useCallback(async (path: string) => {
     setActionError(null);
-    const result = await window.clawster.revealWorkspacePath(path);
+    const result = await window.ayati.revealWorkspacePath(path);
     if (!result.success) {
       setActionError(result.message || getErrorMessage(result.error));
     }
@@ -478,7 +478,7 @@ export const WorkspaceBrowser: React.FC = () => {
             <button type="button" className="workspace-icon-button" onClick={() => void handleRefresh()} title="Refresh workspace">
               <Icon icon="solar:refresh-linear" width="16" height="16" />
             </button>
-            <button type="button" className="workspace-icon-button workspace-close-button" onClick={() => window.clawster.closeWorkspaceBrowser()} title="Close workspace window">
+            <button type="button" className="workspace-icon-button workspace-close-button" onClick={() => window.ayati.closeWorkspaceBrowser()} title="Close workspace window">
               <Icon icon="solar:close-circle-linear" width="18" height="18" />
             </button>
           </div>

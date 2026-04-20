@@ -21,6 +21,7 @@ function getErrorMessage(error: unknown): string {
 export function ScreenshotQuestion(): JSX.Element {
   const [captureState, setCaptureState] = useState<CaptureState>('checking');
   const [reflection, setReflection] = useState<AyahReflection | null>(null);
+  const [collections, setCollections] = useState<AyahCollection[]>([]);
   const [message, setMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
@@ -29,7 +30,7 @@ export function ScreenshotQuestion(): JSX.Element {
     setMessage('');
     setCaptureState('checking');
 
-    const permissionStatus = await window.clawster.getScreenCapturePermission();
+    const permissionStatus = await window.ayati.getScreenCapturePermission();
     if (permissionStatus === 'denied' || permissionStatus === 'restricted') {
       setCaptureState('permission');
       return;
@@ -38,7 +39,7 @@ export function ScreenshotQuestion(): JSX.Element {
     try {
       setCaptureState('capturing');
       setCaptureState('analyzing');
-      const nextReflection = await window.clawster.captureAyahReflection();
+      const nextReflection = await window.ayati.captureAyahReflection();
       setReflection(nextReflection);
       setCaptureState('ready');
       if (nextReflection.syncState === 'local') {
@@ -52,12 +53,13 @@ export function ScreenshotQuestion(): JSX.Element {
 
   useEffect(() => {
     void captureReflection();
+    window.ayati.getAyahCollections?.().then(setCollections).catch(() => setCollections([]));
   }, [captureReflection]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        window.clawster.closeScreenshotQuestion();
+        window.ayati.closeScreenshotQuestion();
       }
     };
 
@@ -71,7 +73,7 @@ export function ScreenshotQuestion(): JSX.Element {
     setMessage('');
 
     try {
-      const savedReflection = await window.clawster.saveAyahReflection(reflection.id);
+      const savedReflection = await window.ayati.saveAyahReflection(reflection.id);
       if (savedReflection) {
         setReflection(savedReflection);
         setMessage(
@@ -87,6 +89,54 @@ export function ScreenshotQuestion(): JSX.Element {
     }
   }, [reflection]);
 
+  const updateCurrentReflection = useCallback((nextReflection: AyahReflection | null) => {
+    if (nextReflection) {
+      setReflection(nextReflection);
+    }
+  }, []);
+
+  const loadTafsir = useCallback(async () => {
+    if (!reflection) return;
+    updateCurrentReflection(await window.ayati.getAyahTafsir(reflection.id));
+  }, [reflection, updateCurrentReflection]);
+
+  const loadAudio = useCallback(async () => {
+    if (!reflection) return;
+    updateCurrentReflection(await window.ayati.getAyahAudio(reflection.id));
+  }, [reflection, updateCurrentReflection]);
+
+  const saveNote = useCallback(async (body: string) => {
+    if (!reflection) return;
+    updateCurrentReflection(await window.ayati.saveAyahReflectionNote(reflection.id, body));
+  }, [reflection, updateCurrentReflection]);
+
+  const addToCollection = useCallback(async (collectionId: string) => {
+    if (!reflection) return;
+    updateCurrentReflection(await window.ayati.addReflectionToCollection(reflection.id, collectionId));
+  }, [reflection, updateCurrentReflection]);
+
+  const setFeedback = useCallback(async (value: 'relevant' | 'not_relevant') => {
+    if (!reflection) return;
+    updateCurrentReflection(await window.ayati.setReflectionFeedback(reflection.id, value));
+  }, [reflection, updateCurrentReflection]);
+
+  const showAlternate = useCallback(async () => {
+    if (!reflection) return;
+    const alternate = await window.ayati.showAlternateAyah(reflection.id);
+    if (alternate) {
+      setReflection(alternate);
+      setMessage(`Another ayah: ${alternate.surahName} ${alternate.verseKey}`);
+      return;
+    }
+    setMessage('No stronger alternate ayah is available for this reflection.');
+  }, [reflection]);
+
+  const copyShareCard = useCallback(async () => {
+    if (!reflection) return;
+    const copied = await window.ayati.copyReflectionShareCard(reflection.id);
+    setMessage(copied ? 'Share card copied.' : 'Could not copy this reflection.');
+  }, [reflection]);
+
   return (
     <div className="screenshot-container ayah-capture-shell">
       <section className="ayah-capture-panel">
@@ -95,7 +145,7 @@ export function ScreenshotQuestion(): JSX.Element {
             <p className="eyebrow">Ayati - Quran Desktop Companion</p>
             <h1>Reflect on Screen</h1>
           </div>
-          <button type="button" className="ayah-close-button" onClick={() => window.clawster.closeScreenshotQuestion()}>
+          <button type="button" className="ayah-close-button" onClick={() => window.ayati.closeScreenshotQuestion()}>
             Close
           </button>
         </header>
@@ -126,7 +176,19 @@ export function ScreenshotQuestion(): JSX.Element {
         )}
 
         {reflection && captureState === 'ready' && (
-          <AyahVerseCard reflection={reflection} isSaving={isSaving} onSave={saveReflection} />
+          <AyahVerseCard
+            reflection={reflection}
+            collections={collections}
+            isSaving={isSaving}
+            onSave={saveReflection}
+            onLoadTafsir={loadTafsir}
+            onLoadAudio={loadAudio}
+            onSaveNote={saveNote}
+            onAddToCollection={addToCollection}
+            onFeedback={setFeedback}
+            onShowAlternate={showAlternate}
+            onShare={copyShareCard}
+          />
         )}
 
         {message && captureState !== 'error' && <p className="ayah-message">{message}</p>}

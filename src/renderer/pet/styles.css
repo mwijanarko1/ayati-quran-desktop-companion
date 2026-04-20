@@ -1340,15 +1340,23 @@
   transform: translateY(-8px) rotate(10deg);
 }
 
-.lobster-container.state-sleep .character-left-wing,
-.lobster-container.state-doze .character-left-wing {
+.lobster-container.state-sleep .character-left-wing {
   animation: none;
   transform: translate(3px, 5px) rotate(8deg) scaleY(0.94);
 }
 
-.lobster-container.state-sleep .character-right-wing,
-.lobster-container.state-doze .character-right-wing {
+.lobster-container.state-sleep .character-right-wing {
   animation: none;
+  transform: translate(-3px, 5px) rotate(-8deg) scaleY(0.94);
+}
+
+.lobster-container.state-doze .character-left-wing {
+  animation: dozeLeftWingLean 4s ease-in-out infinite;
+  transform: translate(3px, 5px) rotate(8deg) scaleY(0.94);
+}
+
+.lobster-container.state-doze .character-right-wing {
+  animation: dozeRightWingLean 4s ease-in-out infinite;
   transform: translate(-3px, 5px) rotate(-8deg) scaleY(0.94);
 }
 
@@ -1412,6 +1420,32 @@
   }
   50% {
     transform: rotate(-12deg) translateY(-7px);
+  }
+}
+
+@keyframes dozeLeftWingLean {
+  0%,
+  100% {
+    transform: translate(3px, 5px) rotate(8deg) scaleY(0.94);
+  }
+  80% {
+    transform: translate(6px, 8px) rotate(23deg) scaleY(0.94);
+  }
+  85% {
+    transform: translate(2px, 5px) rotate(3deg) scaleY(0.94);
+  }
+}
+
+@keyframes dozeRightWingLean {
+  0%,
+  100% {
+    transform: translate(-3px, 5px) rotate(-8deg) scaleY(0.94);
+  }
+  80% {
+    transform: translate(0, 8px) rotate(7deg) scaleY(0.94);
+  }
+  85% {
+    transform: translate(-4px, 5px) rotate(-13deg) scaleY(0.94);
   }
 }
 

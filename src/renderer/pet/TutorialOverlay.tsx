@@ -22,7 +22,7 @@ export const TutorialOverlay: React.FC = () => {
 
   // Listen for tutorial events
   useEffect(() => {
-    window.clawster.onTutorialStep((data: TutorialStepData) => {
+    window.ayati.onTutorialStep((data: TutorialStepData) => {
       setIsActive(true);
       setCurrentStep(data.step);
       setStepCopy(data.copy);
@@ -31,18 +31,18 @@ export const TutorialOverlay: React.FC = () => {
       setShowResumePrompt(false);
     });
 
-    window.clawster.onTutorialHint((data: TutorialHintData) => {
+    window.ayati.onTutorialHint((data: TutorialHintData) => {
       setHintType(data.hintType);
     });
 
-    window.clawster.onTutorialEnded(() => {
+    window.ayati.onTutorialEnded(() => {
       setIsActive(false);
       setCurrentStep(null);
       setHintType(null);
       setShowResumePrompt(false);
     });
 
-    window.clawster.onTutorialResumePrompt(() => {
+    window.ayati.onTutorialResumePrompt(() => {
       setShowResumePrompt(true);
       setIsActive(true);
     });
@@ -50,7 +50,7 @@ export const TutorialOverlay: React.FC = () => {
     // Handle Escape key to skip
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isActive) {
-        window.clawster.tutorialSkip();
+        window.ayati.tutorialSkip();
       }
     };
 
@@ -61,19 +61,19 @@ export const TutorialOverlay: React.FC = () => {
   }, [isActive]);
 
   const handleSkip = useCallback(() => {
-    window.clawster.tutorialSkip();
+    window.ayati.tutorialSkip();
   }, []);
 
   const handleNext = useCallback(() => {
-    window.clawster.tutorialNext();
+    window.ayati.tutorialNext();
   }, []);
 
   const handleResume = useCallback(() => {
-    window.clawster.tutorialResume();
+    window.ayati.tutorialResume();
   }, []);
 
   const handleStartOver = useCallback(() => {
-    window.clawster.tutorialStartOver();
+    window.ayati.tutorialStartOver();
   }, []);
 
   // Format copy text with keyboard hints

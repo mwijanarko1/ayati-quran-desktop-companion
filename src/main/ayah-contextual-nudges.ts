@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 
 import { getFallbackVerseContent } from './ayah-fallbacks';
 import { rankAyahCandidates } from './ayah-theme-engine';
+import { getRandomQuranVerseKey } from './quran-surah-verse-counts';
 import type {
   AyahLensSettings,
   AyahLensState,
@@ -16,8 +17,12 @@ const MAX_RECENT_APP_THEME_KEYS = 30;
 const MIN_ACTIONABLE_CONFIDENCE = 0.58;
 const DEFAULT_NUDGE_COOLDOWN_MINUTES = 15;
 const DEFAULT_MAX_NUDGES_PER_DAY = 8;
+const DEFAULT_TIMED_REMINDER_MINUTES = 15;
+const TIMED_REMINDER_REFLECTION = 'Pause for a Quran reminder and let this ayah reset the next moment.';
+const TIMED_REMINDER_REASON = 'This reminder was shown on the interval you set.';
 
 type NudgeTheme = Exclude<AyahTheme, 'unclear'>;
+type ReflectionCopy = Pick<ReturnType<typeof rankAyahCandidates>[number], 'reflection' | 'whyThisVerse'>;
 
 export interface ContextualNudgeInput {
   app: string;
@@ -34,12 +39,20 @@ export interface ContextualNudgeResult {
   message: {
     id: string;
     text: string;
-    trigger: 'app_switch';
+    trigger: 'app_switch' | 'timer';
     quickReplies: string[];
     reflectionId: string;
   };
   reflection: AyahReflection;
   nextState: AyahLensState['nudgeState'];
+}
+
+export interface TimedQuranReminderInput {
+  now: number;
+  settings: AyahLensSettings;
+  nudgeState: AyahLensState['nudgeState'];
+  recentVerseKeys: string[];
+  fetchVerseContent: (verseKey: string) => Promise<QuranVerseContent>;
 }
 
 interface ClassifiedContext {
@@ -236,6 +249,7 @@ function normalizeNudgeState(
   if (state.shownTodayDate === today) {
     return {
       lastShownAt: state.lastShownAt ?? null,
+      lastTimedReminderAt: state.lastTimedReminderAt ?? null,
       shownToday: state.shownToday,
       shownTodayDate: state.shownTodayDate,
       recentAppThemeKeys: state.recentAppThemeKeys ?? [],
@@ -244,6 +258,7 @@ function normalizeNudgeState(
 
   return {
     lastShownAt: state.lastShownAt ?? null,
+    lastTimedReminderAt: state.lastTimedReminderAt ?? null,
     shownToday: 0,
     shownTodayDate: today,
     recentAppThemeKeys: state.recentAppThemeKeys ?? [],
@@ -273,6 +288,17 @@ function canShowNudge(
   ));
 }
 
+function canShowTimedReminder(
+  state: AyahLensState['nudgeState'],
+  settings: AyahLensSettings,
+  now: number,
+): boolean {
+  if (!settings.timedReminders) return false;
+
+  const intervalMinutes = Math.max(1, settings.timedReminderMinutes || DEFAULT_TIMED_REMINDER_MINUTES);
+  return !state.lastTimedReminderAt || now - state.lastTimedReminderAt >= intervalMinutes * 60 * 1000;
+}
+
 function getNextNudgeState(
   state: AyahLensState['nudgeState'],
   now: number,
@@ -287,15 +313,29 @@ function getNextNudgeState(
 
   return {
     lastShownAt: now,
+    lastTimedReminderAt: state.lastTimedReminderAt ?? null,
     shownToday: state.shownToday + 1,
     shownTodayDate: localDateKey(now),
     recentAppThemeKeys,
   };
 }
 
+function getNextTimedReminderState(
+  state: AyahLensState['nudgeState'],
+  now: number,
+): AyahLensState['nudgeState'] {
+  return {
+    lastShownAt: now,
+    lastTimedReminderAt: now,
+    shownToday: state.shownToday + 1,
+    shownTodayDate: localDateKey(now),
+    recentAppThemeKeys: state.recentAppThemeKeys,
+  };
+}
+
 function buildReflection(
   verse: QuranVerseContent,
-  candidate: ReturnType<typeof rankAyahCandidates>[number],
+  copy: ReflectionCopy,
   insight: ScreenInsight,
   now: number,
 ): AyahReflection {
@@ -307,8 +347,8 @@ function buildReflection(
     arabicText: verse.arabicText,
     translation: verse.translation,
     translatorId: verse.translatorId,
-    reflection: candidate.reflection,
-    whyThisVerse: candidate.whyThisVerse,
+    reflection: copy.reflection,
+    whyThisVerse: copy.whyThisVerse,
     screenSummary: insight.summary,
     themes: insight.themes,
     createdAt: now,
@@ -318,6 +358,24 @@ function buildReflection(
 
 function buildPopupText(label: string, verse: QuranVerseContent): string {
   return `Looks like ${label}. A fitting reminder: "${verse.translation}" - ${verse.verseKey}\n\nReflect on this?`;
+}
+
+function buildTimedReminderText(verse: QuranVerseContent): string {
+  return `Time for a Quran reminder: "${verse.translation}" - ${verse.verseKey}\n\nReflect on this?`;
+}
+
+function getTimedReminderInsight(): ScreenInsight {
+  return {
+    summary: 'A timer-based Quran reminder was due.',
+    category: 'gratitude',
+    themes: [
+      { id: 'gratitude', confidence: 0.72 },
+      { id: 'focus', confidence: 0.64 },
+      { id: 'patience', confidence: 0.6 },
+    ],
+    overallConfidence: 0.72,
+    isSensitive: false,
+  };
 }
 
 export async function buildContextualQuranNudge(input: ContextualNudgeInput): Promise<ContextualNudgeResult | null> {
@@ -347,6 +405,40 @@ export async function buildContextualQuranNudge(input: ContextualNudgeInput): Pr
       id: randomUUID(),
       text: buildPopupText(classified.label, verse),
       trigger: 'app_switch',
+      quickReplies: ['Reflect', 'Save', 'Not now'],
+      reflectionId: reflection.id,
+    },
+  };
+}
+
+export async function buildTimedQuranReminder(input: TimedQuranReminderInput): Promise<ContextualNudgeResult | null> {
+  const normalizedState = normalizeNudgeState(input.nudgeState, input.now);
+  if (!canShowTimedReminder(normalizedState, input.settings, input.now)) {
+    return null;
+  }
+
+  const insight = getTimedReminderInsight();
+  const verseKey = getRandomQuranVerseKey();
+
+  let verse: QuranVerseContent;
+  try {
+    verse = await input.fetchVerseContent(verseKey);
+  } catch {
+    verse = getFallbackVerseContent(verseKey);
+  }
+
+  const reflection = buildReflection(verse, {
+    reflection: TIMED_REMINDER_REFLECTION,
+    whyThisVerse: TIMED_REMINDER_REASON,
+  }, insight, input.now);
+
+  return {
+    reflection,
+    nextState: getNextTimedReminderState(normalizedState, input.now),
+    message: {
+      id: randomUUID(),
+      text: buildTimedReminderText(verse),
+      trigger: 'timer',
       quickReplies: ['Reflect', 'Save', 'Not now'],
       reflectionId: reflection.id,
     },

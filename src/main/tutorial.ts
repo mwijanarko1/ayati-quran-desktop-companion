@@ -13,8 +13,13 @@ interface TutorialStepConfig {
   delayBefore?: number; // ms to wait before showing this step
 }
 
+export const TUTORIAL_MOVE_DURATION_MS = 250;
+export const TUTORIAL_FOLLOW_MOVE_DURATION_MS = 350;
+export const TUTORIAL_FOLLOW_FIRST_CHECK_MS = 150;
+export const TUTORIAL_FOLLOW_INTERVAL_MS = 900;
+
 /**
- * Format hotkey for display (e.g., "CommandOrControl+Shift+Space" -> "Cmd+Shift+Space")
+ * Format hotkey for display (e.g., "CommandOrControl+Alt+," -> "Cmd+Alt+,")
  */
 function formatHotkey(hotkey: string): string {
   return hotkey
@@ -23,17 +28,17 @@ function formatHotkey(hotkey: string): string {
     .replace('Control', 'Ctrl');
 }
 
-const TUTORIAL_STEPS: TutorialStepConfig[] = [
-  { step: 1, copy: "Hi there! I'm Ayati - Quran Desktop Companion, your Quran reflection companion!", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 2500 },
-  { step: 2, copy: "Try clicking on me to see how I react!", fallbackDelay: 3000, delayBefore: 500 },
-  { step: 3, copy: "Fun right? I have lots of different reactions!", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 2500, delayBefore: 500 },
-  { step: 4, copy: "Now move your mouse away from me...", fallbackDelay: 6000, delayBefore: 500 },
-  { step: 5, copy: "I followed you! Don't worry - I only do this when I feel lonely. You can disable this in Settings.", fallbackDelay: 0, delayBefore: 500 },
-  { step: 6, copy: "Want to chat? I'm always here to help!", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 2000, delayBefore: 500 },
-  { step: 7, copy: (hotkeys) => `Press ${formatHotkey(hotkeys.openChat)} to chat with me anytime.`, fallbackDelay: 6000, delayBefore: 500 },
-  { step: 8, copy: "You can also access Settings and chat history.", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 3500, delayBefore: 500 },
-  { step: 9, copy: (hotkeys) => `Press ${formatHotkey(hotkeys.openAssistant)} to open the panel.`, fallbackDelay: 5000, delayBefore: 500 },
-  { step: 10, copy: "That's it! I'll be right here if you need me.", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 3000, delayBefore: 500 },
+export const TUTORIAL_STEPS: TutorialStepConfig[] = [
+  { step: 1, copy: "Hi there! I'm Ayati - Quran Desktop Companion, your Quran reflection companion!", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 900 },
+  { step: 2, copy: "Try clicking on me to see how I react!", fallbackDelay: 1200 },
+  { step: 3, copy: "Fun right? I have lots of different reactions!", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 900 },
+  { step: 4, copy: "Now move your mouse away from me...", fallbackDelay: 1600 },
+  { step: 5, copy: "I followed you! Don't worry - I only do this when I feel lonely. You can disable this in Settings.", fallbackDelay: 0 },
+  { step: 6, copy: "Want to chat? I'm always here to help!", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 800 },
+  { step: 7, copy: (hotkeys) => `Press ${formatHotkey(hotkeys.openChat)} to chat with me anytime.`, fallbackDelay: 1600 },
+  { step: 8, copy: "You can also access Settings and chat history.", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 1000 },
+  { step: 9, copy: (hotkeys) => `Press ${formatHotkey(hotkeys.openAssistant)} to open the panel.`, fallbackDelay: 1600 },
+  { step: 10, copy: "That's it! I'll be right here if you need me.", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 1000 },
 ];
 
 export class TutorialManager {
@@ -125,7 +130,7 @@ export class TutorialManager {
     const centerX = Math.round((screenWidth - petWidth) / 2);
     const centerY = Math.round((screenHeight - petHeight) / 2);
 
-    await this.animateMoveTo(centerX, centerY, 1000);
+    await this.animateMoveTo(centerX, centerY, TUTORIAL_MOVE_DURATION_MS);
   }
 
   /**
@@ -141,7 +146,7 @@ export class TutorialManager {
     const targetX = screenWidth - petWidth - 20;
     const targetY = screenHeight - petHeight - 20;
 
-    await this.animateMoveTo(targetX, targetY, 1000);
+    await this.animateMoveTo(targetX, targetY, TUTORIAL_MOVE_DURATION_MS);
   }
 
   /**
@@ -470,8 +475,7 @@ export class TutorialManager {
 
       console.log(`[Tutorial] Following cursor to (${targetX}, ${targetY}), distance was ${Math.round(distance)}px`);
 
-      // Animate move - same 1500ms as attention seeker
-      await this.animateMoveTo(targetX, targetY, 1500);
+      await this.animateMoveTo(targetX, targetY, TUTORIAL_FOLLOW_MOVE_DURATION_MS);
 
       isMoving = false;
       followCount++;
@@ -497,11 +501,9 @@ export class TutorialManager {
       }
     };
 
-    // Use similar timing to attention seeker - check every 3-5 seconds
-    this.followInterval = setInterval(doFollow, 4000);
+    this.followInterval = setInterval(doFollow, TUTORIAL_FOLLOW_INTERVAL_MS);
 
-    // Do first check after 1 second
-    setTimeout(doFollow, 1000);
+    setTimeout(doFollow, TUTORIAL_FOLLOW_FIRST_CHECK_MS);
   }
 
   /**

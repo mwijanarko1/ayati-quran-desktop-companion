@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildContextualQuranNudge } from './ayah-contextual-nudges';
+import { buildContextualQuranNudge, buildTimedQuranReminder } from './ayah-contextual-nudges';
 import { createDefaultAyahLensState } from './ayah-reflection-store';
 import type { AyahLensSettings, QuranVerseContent } from './ayah-types';
 
@@ -67,6 +67,7 @@ describe('buildContextualQuranNudge', () => {
     const result = await buildContextualQuranNudge(defaultInput({
       nudgeState: {
         lastShownAt: NOW - 5 * 60 * 1000,
+        lastTimedReminderAt: null,
         shownToday: 1,
         shownTodayDate: '2026-04-20',
         recentAppThemeKeys: [],
@@ -80,6 +81,7 @@ describe('buildContextualQuranNudge', () => {
     const result = await buildContextualQuranNudge(defaultInput({
       nudgeState: {
         lastShownAt: NOW - 20 * 60 * 1000,
+        lastTimedReminderAt: null,
         shownToday: 8,
         shownTodayDate: '2026-04-20',
         recentAppThemeKeys: [],
@@ -105,6 +107,7 @@ describe('buildContextualQuranNudge', () => {
     const result = await buildContextualQuranNudge(defaultInput({
       nudgeState: {
         lastShownAt: NOW - 20 * 60 * 1000,
+        lastTimedReminderAt: null,
         shownToday: 1,
         shownTodayDate: '2026-04-20',
         recentAppThemeKeys: [{ key: 'safari:study', shownAt: NOW - 60 * 60 * 1000 }],
@@ -132,6 +135,7 @@ describe('buildContextualQuranNudge', () => {
   it('keeps nudge state unchanged when no popup is shown', async () => {
     const nudgeState = {
       lastShownAt: NOW - 20 * 60 * 1000,
+      lastTimedReminderAt: null,
       shownToday: 1,
       shownTodayDate: '2026-04-20',
       recentAppThemeKeys: [],
@@ -144,5 +148,94 @@ describe('buildContextualQuranNudge', () => {
 
     expect(result).toBeNull();
     expect(nudgeState.shownToday).toBe(1);
+  });
+});
+
+describe('buildTimedQuranReminder', () => {
+  it('chooses a random surah and then a random verse from that surah', async () => {
+    const randomSpy = vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0.999)
+      .mockReturnValueOnce(0.999);
+    const fetchVerseContent = vi.fn(async (verseKey: string) => ({
+      ...verseContent,
+      verseKey,
+      surahName: 'An-Nas',
+      ayahNumber: 6,
+    }));
+
+    const result = await buildTimedQuranReminder(defaultInput({
+      settings: defaultSettings({
+        timedReminders: true,
+        timedReminderMinutes: 5,
+      }),
+      fetchVerseContent,
+    }));
+
+    expect(fetchVerseContent).toHaveBeenCalledWith('114:6');
+    expect(result?.reflection).toMatchObject({
+      verseKey: '114:6',
+      surahName: 'An-Nas',
+      ayahNumber: 6,
+    });
+    randomSpy.mockRestore();
+  });
+
+  it('returns a Quran reminder when the configured timer is due', async () => {
+    const result = await buildTimedQuranReminder(defaultInput({
+      settings: defaultSettings({
+        timedReminders: true,
+        timedReminderMinutes: 5,
+      }),
+      nudgeState: {
+        lastShownAt: NOW - 20 * 60 * 1000,
+        lastTimedReminderAt: NOW - 5 * 60 * 1000,
+        shownToday: 1,
+        shownTodayDate: '2026-04-20',
+        recentAppThemeKeys: [],
+      },
+    }));
+
+    expect(result?.message).toMatchObject({
+      trigger: 'timer',
+      quickReplies: ['Reflect', 'Save', 'Not now'],
+    });
+    expect(result?.message.text).toContain('Time for a Quran reminder');
+    expect(result?.nextState.shownToday).toBe(2);
+    expect(result?.nextState.lastShownAt).toBe(NOW);
+    expect(result?.nextState.lastTimedReminderAt).toBe(NOW);
+    expect(result?.reflection).toMatchObject({
+      syncState: 'local',
+      screenSummary: 'A timer-based Quran reminder was due.',
+      whyThisVerse: 'This reminder was shown on the interval you set.',
+    });
+  });
+
+  it('returns null when timed reminders are disabled', async () => {
+    const result = await buildTimedQuranReminder(defaultInput({
+      settings: defaultSettings({
+        timedReminders: false,
+        timedReminderMinutes: 5,
+      }),
+    }));
+
+    expect(result).toBeNull();
+  });
+
+  it('waits until the custom interval has elapsed', async () => {
+    const result = await buildTimedQuranReminder(defaultInput({
+      settings: defaultSettings({
+        timedReminders: true,
+        timedReminderMinutes: 60,
+      }),
+      nudgeState: {
+        lastShownAt: NOW - 20 * 60 * 1000,
+        lastTimedReminderAt: NOW - 59 * 60 * 1000,
+        shownToday: 1,
+        shownTodayDate: '2026-04-20',
+        recentAppThemeKeys: [],
+      },
+    }));
+
+    expect(result).toBeNull();
   });
 });

@@ -80,4 +80,42 @@ describe('rankAyahCandidates', () => {
       isFallback: false,
     });
   });
+
+  it('boosts themes marked relevant in previous feedback', () => {
+    const insight: ScreenInsight = {
+      summary: 'The user is working through a planning document.',
+      category: 'work',
+      themes: [
+        { id: 'work', confidence: 0.55 },
+        { id: 'planning', confidence: 0.55 },
+      ],
+      overallConfidence: 0.65,
+      isSensitive: false,
+    };
+
+    const ranked = rankAyahCandidates(insight, [], [
+      { verseKey: '18:24', themeId: 'planning', value: 'relevant' },
+    ]);
+
+    expect(ranked[0]).toMatchObject({
+      verseKey: '18:24',
+      themeId: 'planning',
+    });
+  });
+
+  it('penalizes verse and theme pairs marked not relevant', () => {
+    const insight: ScreenInsight = {
+      summary: 'The user is under heavy deadline pressure.',
+      category: 'stress',
+      themes: [{ id: 'stress', confidence: 0.92 }],
+      overallConfidence: 0.88,
+      isSensitive: false,
+    };
+
+    const ranked = rankAyahCandidates(insight, [], [
+      { verseKey: '2:286', themeId: 'stress', value: 'not_relevant' },
+    ]);
+
+    expect(ranked[0].verseKey).not.toBe('2:286');
+  });
 });

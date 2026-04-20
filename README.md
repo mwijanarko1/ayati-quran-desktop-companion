@@ -31,7 +31,12 @@ OpenAI-compatible providers append `/chat/completions`; Claude appends `/message
 Ayati - Quran Desktop Companion uses the required Quran Foundation API categories:
 
 - **Content API:** `GET {QURAN_API_BASE_URL}/content/api/v4/verses/by_key/{verseKey}` with `translations`, `fields=text_uthmani`, and `translation_fields=resource_name` to fetch Arabic text and translation.
+- **Content API:** `GET {QURAN_API_BASE_URL}/content/api/v4/tafsirs/{resourceId}/by_ayah/{verseKey}` for tafsir snippets.
+- **Content API:** `GET {QURAN_API_BASE_URL}/content/api/v4/recitations/{recitationId}/by_ayah/{verseKey}` for ayah recitation audio.
 - **User API:** `POST {QURAN_API_BASE_URL}/auth/v1/bookmarks` to save an ayah bookmark with `key`, `verseNumber`, `type: "ayah"`, and `mushaf`.
+- **User API:** `POST {QURAN_API_BASE_URL}/auth/v1/notes` to save personal reflection notes attached to the selected ayah.
+- **User API:** `POST {QURAN_API_BASE_URL}/auth/v1/collections` and `POST /auth/v1/collections/{collectionId}/bookmarks` to create collections and place saved ayahs into them.
+- **User API:** `POST {QURAN_API_BASE_URL}/auth/v1/activity-days` plus `GET /auth/v1/streaks/current-streak-days?type=QURAN` to record Quran activity and display the current streak.
 - **OAuth2/OIDC:** `GET {QURAN_AUTH_BASE_URL}/oauth2/auth` and `POST {QURAN_AUTH_BASE_URL}/oauth2/token` using PKCE authorization code flow for user sign-in and refresh.
 
 Configure local demo credentials in `.env.local`:
@@ -47,7 +52,7 @@ For production, move token exchange to a backend proxy. Desktop apps cannot trul
 
 ## Privacy
 
-Ayati - Quran Desktop Companion does not persist screenshot images by default. Screenshots are captured for analysis, cleared after the reflection is built, and local history stores only text summaries, ayah content, themes, timestamps, and sync state. Quran translations returned by Quran Foundation are displayed as returned and are not re-translated.
+Ayati - Quran Desktop Companion does not persist screenshot images by default. Screenshots are captured for analysis, cleared after the reflection is built, and local history stores only text summaries, ayah content, themes, timestamps, notes, collection IDs, feedback, and sync state. Quran translations and tafsir returned by Quran Foundation are displayed as returned and are not re-translated.
 
 ## Demo Script
 
@@ -55,9 +60,12 @@ Ayati - Quran Desktop Companion does not persist screenshot images by default. S
 2. Sign in with Quran Foundation.
 3. Press `Cmd+Shift+/` or choose **Reflect on Screen**.
 4. Show the ayah card with Arabic text, translation, reference, reflection, and why it was selected.
-5. Save the bookmark and confirm synced or pending status.
-6. Open the **Reflections** tab to show local history and saved state.
-7. Clear the AI provider base URL or deny Screen Recording to show the low-confidence fallback path.
+5. Expand tafsir, then play recitation for the returned ayah.
+6. Save the bookmark and confirm synced or pending status.
+7. Add a personal note and save the ayah into a Quran Foundation collection.
+8. Mark the ayah relevant, then use **Show Another Ayah** to demonstrate alternate ranked candidates.
+9. Open the **Reflections** tab to show filters, the day recap, streak state, and saved collection/note metadata.
+10. Copy the branded share card.
 
 ## Development
 
@@ -77,3 +85,9 @@ Runtime code lives under `src/`:
 - `src/renderer/assistant/` - assistant panel with chat, reflections, and settings.
 - `src/renderer/screenshot-question/` - floating screenshot reflection surface.
 - `src/renderer/onboarding/` - first-launch setup.
+
+## License
+
+This project is licensed under a modified MIT License. It requires any website or application using this software in production to include a visible backlink to [mikhailwijanarko.xyz](https://mikhailwijanarko.xyz) on its landing page.
+
+See the [LICENSE](LICENSE) file for the full text.

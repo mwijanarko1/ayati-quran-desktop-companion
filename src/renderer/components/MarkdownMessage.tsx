@@ -18,7 +18,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content }) => 
               className="message-link"
               onClick={(e) => {
                 e.preventDefault();
-                if (href) window.clawster.openExternal(href);
+                if (href) window.ayati.openExternal(href);
               }}
             >
               {children}

@@ -29,27 +29,27 @@ export const ChatBar: React.FC = () => {
 
   // Check connection status on mount and listen for changes
   useEffect(() => {
-    window.clawster.getClawbotStatus().then((status) => setIsConnected(status.connected));
-    window.clawster.onConnectionStatusChange((status) => setIsConnected(status.connected));
+    window.ayati.getClawbotStatus().then((status) => setIsConnected(status.connected));
+    window.ayati.onConnectionStatusChange((status) => setIsConnected(status.connected));
 
     // Listen for cron results
-    window.clawster.onCronResult((data) => {
+    window.ayati.onCronResult((data) => {
       setResponse(data.summary);
     });
 
-    window.clawster.onClawbotStreamChunk((data) => {
+    window.ayati.onClawbotStreamChunk((data) => {
       if (data.requestId !== activeStreamRequestIdRef.current) return;
       setResponse(data.text);
     });
 
-    window.clawster.onClawbotStreamEnd(async (data) => {
+    window.ayati.onClawbotStreamEnd(async (data) => {
       if (data.requestId !== activeStreamRequestIdRef.current) return;
       const streamResponse = data.response as { text?: string };
       const finalText = streamResponse.text || 'No response';
       setResponse(finalText);
 
       if (activePetPopupIdRef.current) {
-        window.clawster.showPetChat({
+        window.ayati.showPetChat({
           id: activePetPopupIdRef.current,
           text: finalText,
           quickReplies: ['Thanks!', 'Not now'],
@@ -67,13 +67,13 @@ export const ChatBar: React.FC = () => {
       inputRef.current?.focus();
     });
 
-    window.clawster.onClawbotStreamError(async (data) => {
+    window.ayati.onClawbotStreamError(async (data) => {
       if (data.requestId !== activeStreamRequestIdRef.current) return;
       const errorMsg = `Error: ${data.error}`;
       setResponse(errorMsg);
 
       if (activePetPopupIdRef.current) {
-        window.clawster.showPetChat({
+        window.ayati.showPetChat({
           id: activePetPopupIdRef.current,
           text: errorMsg,
           quickReplies: ['Got it', 'Not now'],
@@ -94,7 +94,7 @@ export const ChatBar: React.FC = () => {
 
   // Helper to save messages to shared history
   const saveMessageToHistory = async (userMsg: string, assistantMsg: string) => {
-    const history = (await window.clawster.getChatHistory()) as Message[];
+    const history = (await window.ayati.getChatHistory()) as Message[];
     const newMessages: Message[] = [
       ...history,
       {
@@ -110,8 +110,8 @@ export const ChatBar: React.FC = () => {
         timestamp: Date.now(),
       },
     ];
-    await window.clawster.saveChatHistory(newMessages);
-    window.clawster.notifyChatSync?.();
+    await window.ayati.saveChatHistory(newMessages);
+    window.ayati.notifyChatSync?.();
   };
 
   // Focus input on mount
@@ -123,7 +123,7 @@ export const ChatBar: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        window.clawster.closeChatbar();
+        window.ayati.closeChatbar();
       }
     };
 
@@ -137,13 +137,13 @@ export const ChatBar: React.FC = () => {
     setIsCapturing(true);
     try {
       // Check permission first - if denied, show message
-      const permissionStatus = await window.clawster.getScreenCapturePermission();
+      const permissionStatus = await window.ayati.getScreenCapturePermission();
       if (permissionStatus === 'denied' || permissionStatus === 'restricted') {
         alert('Screen recording permission required. Please enable in System Settings > Privacy & Security > Screen Recording');
         return;
       }
 
-      const result = await window.clawster.captureScreenWithContext();
+      const result = await window.ayati.captureScreenWithContext();
       if (result) {
         setScreenshot(result as Screenshot);
       }
@@ -181,7 +181,7 @@ export const ChatBar: React.FC = () => {
       let result: { response?: string; text?: string; error?: string };
 
       if (screenshot) {
-        result = await window.clawster.askAboutScreen(message, screenshot.image) as typeof result;
+        result = await window.ayati.askAboutScreen(message, screenshot.image) as typeof result;
         setScreenshot(null);
         let responseText = '';
         if (result.response) {
@@ -202,15 +202,15 @@ export const ChatBar: React.FC = () => {
       } else {
         const popupId = crypto.randomUUID();
         activePetPopupIdRef.current = popupId;
-        window.clawster.showPetChat({
+        window.ayati.showPetChat({
           id: popupId,
           text: '...',
           quickReplies: [],
         });
-        window.clawster.closeChatbar();
+        window.ayati.closeChatbar();
 
         pendingUserMessageRef.current = message;
-        const started = await window.clawster.startClawbotStream(message);
+        const started = await window.ayati.startClawbotStream(message);
         if (started.requestId && !started.error) {
           handedOffToStream = true;
           activeStreamRequestIdRef.current = started.requestId;
@@ -218,7 +218,7 @@ export const ChatBar: React.FC = () => {
           return;
         }
 
-        result = await window.clawster.sendToClawbot(message) as typeof result;
+        result = await window.ayati.sendToClawbot(message) as typeof result;
 
         let fallbackText = '';
         if (result.response) {
@@ -230,7 +230,7 @@ export const ChatBar: React.FC = () => {
         }
 
         if (activePetPopupIdRef.current) {
-          window.clawster.showPetChat({
+          window.ayati.showPetChat({
             id: activePetPopupIdRef.current,
             text: fallbackText || 'No response',
             quickReplies: ['Thanks!', 'Not now'],
@@ -256,7 +256,7 @@ export const ChatBar: React.FC = () => {
       const errorMsg = 'Failed to connect to ClawBot';
       setResponse(errorMsg);
       if (activePetPopupIdRef.current) {
-        window.clawster.showPetChat({
+        window.ayati.showPetChat({
           id: activePetPopupIdRef.current,
           text: errorMsg,
           quickReplies: ['Got it', 'Not now'],
@@ -276,11 +276,11 @@ export const ChatBar: React.FC = () => {
 
   // Handle mouse enter/leave to toggle click-through behavior
   const handleMouseEnter = () => {
-    window.clawster.setChatbarIgnoreMouse(false);
+    window.ayati.setChatbarIgnoreMouse(false);
   };
 
   const handleMouseLeave = () => {
-    window.clawster.setChatbarIgnoreMouse(true);
+    window.ayati.setChatbarIgnoreMouse(true);
   };
 
   const AyatiIcon = ({ size = 24 }: { size?: number }) => (

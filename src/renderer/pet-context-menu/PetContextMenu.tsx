@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Icon } from '@iconify/react';
 
 type MenuAction = 'chat' | 'settings' | 'workspace' | 'quit';
@@ -28,18 +28,22 @@ const SOCIAL_LINKS: SocialLink[] = [
 const FEEDBACK_URL = 'https://github.com/mwijanarko1/ayati-quran-desktop-companion/issues';
 
 export const PetContextMenu: React.FC = () => {
+  const hasDispatchedCommandRef = useRef(false);
+
   const handleClick = (action: MenuAction) => {
-    window.clawster.petContextMenuAction(action);
+    if (hasDispatchedCommandRef.current) return;
+    hasDispatchedCommandRef.current = true;
+    window.ayati.petContextMenuAction(action);
   };
 
   const handleSocialClick = (url: string) => {
-    window.clawster.openExternal(url);
-    window.clawster.hidePetContextMenu();
+    window.ayati.openExternal(url);
+    window.ayati.hidePetContextMenu();
   };
 
   const handleFeedbackClick = () => {
-    window.clawster.openExternal(FEEDBACK_URL);
-    window.clawster.hidePetContextMenu();
+    window.ayati.openExternal(FEEDBACK_URL);
+    window.ayati.hidePetContextMenu();
   };
 
   return (

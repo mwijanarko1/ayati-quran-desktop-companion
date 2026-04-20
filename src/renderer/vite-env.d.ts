@@ -64,6 +64,73 @@ interface AyahReflection {
   savedAt?: number;
   quranBookmarkId?: string;
   syncState: 'local' | 'synced' | 'pending' | 'failed';
+  tafsir?: QuranTafsirSnippet;
+  audio?: QuranAudioFile;
+  note?: AyahReflectionNote;
+  collectionIds?: string[];
+  feedback?: ReflectionFeedback;
+  alternateGroupId?: string;
+  sourceCandidateIndex?: number;
+  rankedCandidateVerseKeys?: string[];
+}
+
+interface QuranTafsirSnippet {
+  resourceId: number;
+  resourceName: string;
+  languageName?: string;
+  text: string;
+  fetchedAt: number;
+}
+
+interface QuranAudioFile {
+  recitationId: number;
+  reciterName?: string;
+  url: string;
+  duration?: number;
+  fetchedAt: number;
+}
+
+interface AyahReflectionNote {
+  localId: string;
+  quranNoteId?: string;
+  body: string;
+  syncState: 'local' | 'synced' | 'pending' | 'failed';
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface AyahCollection {
+  id: string;
+  name: string;
+  slug?: string;
+  syncState: 'synced' | 'pending' | 'failed';
+}
+
+interface ReflectionFeedback {
+  value: 'relevant' | 'not_relevant';
+  createdAt: number;
+}
+
+interface AyahDaySummary {
+  date: string;
+  reflectionCount: number;
+  savedCount: number;
+  noteCount: number;
+  themes: Array<{ id: AyahTheme; count: number }>;
+  reflections: Array<{
+    id: string;
+    verseKey: string;
+    surahName: string;
+    reflection: string;
+    note?: string;
+  }>;
+}
+
+interface QuranStreakSummary {
+  currentDays: number | null;
+  recordedToday: boolean;
+  syncState: 'synced' | 'pending' | 'unavailable';
+  error?: string;
 }
 
 interface QuranAuthStatus {
@@ -83,10 +150,16 @@ interface AyahLensSettings {
   contextualNudges: boolean;
   nudgeCooldownMinutes: number;
   maxNudgesPerDay: number;
+  timedReminders: boolean;
+  timedReminderMinutes: number;
+  tafsirResourceId: number | null;
+  tafsirResourceName: string | null;
+  recitationId: number | null;
+  reciterName: string | null;
 }
 
 interface OnboardingData {
-  workspaceType: 'clawster';
+  workspaceType: 'ayati';
   launchOnStartup: boolean;
   aiProvider?: ClawBotProvider;
   gatewayUrl: string;
@@ -101,7 +174,7 @@ interface OnboardingData {
 }
 
 interface CurrentWorkspaceInfo {
-  workspaceType: 'clawster' | null;
+  workspaceType: 'ayati' | null;
   workspacePath: string | null;
   exists: boolean;
 }
@@ -137,7 +210,46 @@ interface WorkspacePreviewResult {
   message?: string;
 }
 
-interface ClawsterAPI {
+type DesktopUpdateStatus =
+  | 'disabled'
+  | 'idle'
+  | 'checking'
+  | 'up-to-date'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+type DesktopRuntimeArch = 'arm64' | 'x64' | 'other';
+
+interface DesktopUpdateState {
+  enabled: boolean;
+  status: DesktopUpdateStatus;
+  currentVersion: string;
+  hostArch: DesktopRuntimeArch;
+  appArch: DesktopRuntimeArch;
+  runningUnderArm64Translation: boolean;
+  availableVersion: string | null;
+  downloadedVersion: string | null;
+  downloadPercent: number | null;
+  checkedAt: string | null;
+  message: string | null;
+  errorContext: 'check' | 'download' | 'install' | null;
+  canRetry: boolean;
+}
+
+interface DesktopUpdateActionResult {
+  accepted: boolean;
+  completed: boolean;
+  state: DesktopUpdateState;
+}
+
+interface DesktopUpdateCheckResult {
+  checked: boolean;
+  state: DesktopUpdateState;
+}
+
+interface AyatiAPI {
   toggleAssistant: () => void;
   openAssistant: () => void;
   closeAssistant: () => void;
@@ -145,6 +257,7 @@ interface ClawsterAPI {
   closeWorkspaceBrowser: () => void;
   forcePetSleep: () => void;
   forceActiveAppComment: () => Promise<boolean>;
+  forceTimedReminderComment: () => Promise<boolean>;
   toggleChatbar: () => void;
   closeChatbar: () => void;
   setChatbarIgnoreMouse: (ignore: boolean) => void;
@@ -167,6 +280,11 @@ interface ClawsterAPI {
   previewWorkspaceFile: (relativePath?: string) => Promise<WorkspacePreviewResult>;
   getSettings: () => Promise<unknown>;
   updateSettings: (key: string, value: unknown) => Promise<unknown>;
+  getUpdateState: () => Promise<DesktopUpdateState>;
+  checkForUpdate: () => Promise<DesktopUpdateCheckResult>;
+  downloadUpdate: () => Promise<DesktopUpdateActionResult>;
+  installUpdate: () => Promise<DesktopUpdateActionResult>;
+  onUpdateState: (callback: (state: DesktopUpdateState) => void) => void;
   startQuranOAuth: () => Promise<{ authorizeUrl: string }>;
   completeQuranOAuthCallback: (callbackUrl: string) => Promise<QuranAuthStatus>;
   getQuranAuthStatus: () => Promise<QuranAuthStatus>;
@@ -175,6 +293,17 @@ interface ClawsterAPI {
   saveAyahReflection: (reflectionId: string) => Promise<AyahReflection | null>;
   getAyahReflectionHistory: () => Promise<AyahReflection[]>;
   deleteAyahReflection: (reflectionId: string) => Promise<boolean>;
+  getAyahTafsir: (reflectionId: string) => Promise<AyahReflection | null>;
+  getAyahAudio: (reflectionId: string) => Promise<AyahReflection | null>;
+  saveAyahReflectionNote: (reflectionId: string, body: string) => Promise<AyahReflection | null>;
+  getAyahCollections: () => Promise<AyahCollection[]>;
+  createAyahCollection: (name: string) => Promise<AyahCollection>;
+  addReflectionToCollection: (reflectionId: string, collectionId: string) => Promise<AyahReflection | null>;
+  setReflectionFeedback: (reflectionId: string, value: 'relevant' | 'not_relevant') => Promise<AyahReflection | null>;
+  showAlternateAyah: (reflectionId: string) => Promise<AyahReflection | null>;
+  getAyahDaySummary: () => Promise<AyahDaySummary>;
+  getQuranStreakSummary: () => Promise<QuranStreakSummary>;
+  copyReflectionShareCard: (reflectionId: string) => Promise<boolean>;
   getAyahLensSettings: () => Promise<AyahLensSettings>;
   updateAyahLensSetting: (key: string, value: unknown) => Promise<AyahLensSettings>;
   onAyahOAuthCallback: (callback: (callbackUrl: string) => void) => void;
@@ -248,5 +377,5 @@ interface ClawsterAPI {
 }
 
 interface Window {
-  clawster: ClawsterAPI;
+  ayati: AyatiAPI;
 }

@@ -5,100 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="../../assets/icon.png" />
     <title>Ayati - Quran Desktop Companion Setup</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+
+    <!-- Preconnect so font downloads start immediately in parallel -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!-- Font stylesheet via <link> (non-blocking; avoids @import waterfall) -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Amiri+Quran&display=swap"
+    />
+
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Amiri+Quran&display=swap');
-
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-
-      html, body, #root {
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-      }
-
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body, #root { width: 100%; height: 100%; overflow: hidden; }
       body {
-        font-family: 'Source Sans 3', sans-serif;
-        background-color: #AFF9C9;
-        color: #07120f;
+        font-family: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
+        background-color: #FAF9F6;
+        color: #1a2a24;
         display: flex;
         align-items: center;
         justify-content: center;
         -webkit-font-smoothing: antialiased;
       }
-
-      h1,
-      h2,
-      .brand-display {
-        font-family: 'Sora', sans-serif;
-      }
-
-      code,
-      .font-mono {
-        font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-      }
-
-      /* Animations */
-      @keyframes slideIn {
-        from { opacity: 0; transform: translateX(1.5rem); }
-        to { opacity: 1; transform: translateX(0); }
-      }
-
-      .step-enter {
-        animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-      }
-
-      @keyframes happyBounce {
-        0%, 100% { transform: translateY(0) scale(1); }
-        50% { transform: translateY(-0.75rem) scale(1.02); }
-      }
-      .animate-happy-bounce {
-        animation: happyBounce 2s infinite cubic-bezier(0.4, 0, 0.2, 1);
-      }
-
-      @keyframes chestPuff {
-        0%, 100% { transform: scale(1); }
-        50% { transform: scale(1.08) scaleX(1.12); }
-      }
-      .animate-chest-puff {
-        animation: chestPuff 2.5s infinite ease-in-out;
-      }
-
-      /* Scrollbar hiding */
-      .scrollbar-hide::-webkit-scrollbar {
-        display: none;
-      }
-      .scrollbar-hide {
-        -ms-overflow-style: none;
-        scrollbar-width: none;
-      }
-
-      /* Custom input autocomplete styling for setup theme */
-      input:-webkit-autofill,
-      input:-webkit-autofill:hover,
-      input:-webkit-autofill:focus,
-      input:-webkit-autofill:active {
-        -webkit-box-shadow: 0 0 0 30px #AFF9C9 inset !important;
-        -webkit-text-fill-color: #07120f !important;
-        transition: background-color 5000s ease-in-out 0s;
-      }
-
-      /* Electron window dragging */
-      .drag-region {
-        -webkit-app-region: drag;
-      }
-      .no-drag {
-        -webkit-app-region: no-drag;
-      }
     </style>
   </head>
   <body>
     <div id="root"></div>
+    <!-- Vite processes this through PostCSS + Tailwind at build time -->
+    <!-- NO CDN scripts — icons are bundled via @iconify/react -->
     <script type="module" src="./onboarding/main.tsx"></script>
   </body>
 </html>

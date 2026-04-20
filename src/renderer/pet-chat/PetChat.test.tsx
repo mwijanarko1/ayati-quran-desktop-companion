@@ -5,14 +5,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PetChat } from './PetChat';
 
-type PetChatMessageHandler = Parameters<Window['clawster']['onPetChatMessage']>[0];
+type PetChatMessageHandler = Parameters<Window['ayati']['onPetChatMessage']>[0];
 
-function installMockClawster(): {
+function installMockAyati(): {
   sendPetMessage: PetChatMessageHandler;
-  clawster: Partial<Window['clawster']>;
+  ayati: Partial<Window['ayati']>;
 } {
   let messageHandler: PetChatMessageHandler = () => {};
-  const clawster = {
+  const ayati = {
     onPetChatMessage: vi.fn((callback: PetChatMessageHandler) => {
       messageHandler = callback;
     }),
@@ -24,17 +24,17 @@ function installMockClawster(): {
     saveAyahReflection: vi.fn(),
     getClawbotStatus: vi.fn(),
     sendToClawbot: vi.fn(),
-  } satisfies Partial<Window['clawster']>;
+  } satisfies Partial<Window['ayati']>;
 
-  Object.defineProperty(window, 'clawster', {
+  Object.defineProperty(window, 'ayati', {
     configurable: true,
     writable: true,
-    value: clawster,
+    value: ayati,
   });
 
   return {
     sendPetMessage: (message) => messageHandler(message),
-    clawster,
+    ayati,
   };
 }
 
@@ -53,7 +53,7 @@ describe('PetChat', () => {
   });
 
   it('presents pet messages as a speech bubble with a visible tail', async () => {
-    const { sendPetMessage } = installMockClawster();
+    const { sendPetMessage } = installMockAyati();
 
     render(<PetChat />);
 
@@ -74,13 +74,13 @@ describe('PetChat', () => {
     expect(screen.getByRole('button', { name: 'Tell me more' })).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(window.clawster.resizePetChat).toHaveBeenCalled();
+      expect(window.ayati.resizePetChat).toHaveBeenCalled();
     });
   });
 
   it('opens the reflection flow when a Quran nudge asks to reflect', async () => {
     const user = userEvent.setup();
-    const { sendPetMessage } = installMockClawster();
+    const { sendPetMessage } = installMockAyati();
 
     render(<PetChat />);
 
@@ -97,15 +97,15 @@ describe('PetChat', () => {
       await user.click(screen.getByRole('button', { name: 'Reflect' }));
     });
 
-    expect(window.clawster.petChatReply).toHaveBeenCalledWith('curious');
-    expect(window.clawster.openAssistant).toHaveBeenCalled();
-    expect(window.clawster.hidePetChat).toHaveBeenCalled();
+    expect(window.ayati.petChatReply).toHaveBeenCalledWith('curious');
+    expect(window.ayati.openAssistant).toHaveBeenCalled();
+    expect(window.ayati.hidePetChat).toHaveBeenCalled();
   });
 
   it('saves the linked reflection when a Quran nudge asks to save', async () => {
     const user = userEvent.setup();
-    const { sendPetMessage } = installMockClawster();
-    vi.mocked(window.clawster.saveAyahReflection).mockResolvedValue({
+    const { sendPetMessage } = installMockAyati();
+    vi.mocked(window.ayati.saveAyahReflection).mockResolvedValue({
       id: 'reflection-1',
       verseKey: '96:1',
       surahName: 'Al-Alaq',
@@ -138,13 +138,13 @@ describe('PetChat', () => {
     });
 
     await waitFor(() => {
-      expect(window.clawster.saveAyahReflection).toHaveBeenCalledWith('reflection-1');
+      expect(window.ayati.saveAyahReflection).toHaveBeenCalledWith('reflection-1');
     });
     expect(await screen.findByText(/saved this reflection/i)).toBeInTheDocument();
   });
 
   it('dismisses Quran nudges when the user chooses not now', () => {
-    const { sendPetMessage } = installMockClawster();
+    const { sendPetMessage } = installMockAyati();
 
     render(<PetChat />);
 
@@ -159,7 +159,7 @@ describe('PetChat', () => {
 
     screen.getByRole('button', { name: 'Not now' }).click();
 
-    expect(window.clawster.petChatReply).toHaveBeenCalledWith('dismiss');
-    expect(window.clawster.hidePetChat).toHaveBeenCalled();
+    expect(window.ayati.petChatReply).toHaveBeenCalledWith('dismiss');
+    expect(window.ayati.hidePetChat).toHaveBeenCalled();
   });
 });

@@ -13,7 +13,7 @@ The workspace root contains runtime code, package metadata, and hackathon planni
 ## Directory Guide
 
 - `src/main/main.ts` - Electron app bootstrap, window creation, global hotkeys, screen capture, IPC handlers, tray, app lifecycle, and Ayati - Quran Desktop Companion orchestration.
-- `src/main/preload.ts` - `window.clawster` bridge exposed to renderer windows.
+- `src/main/preload.ts` - `window.ayati` bridge exposed to renderer windows.
 - `src/main/store.ts` - `electron-store` schema, OpenRouter defaults, and legacy local-provider migration.
 - `src/main/clawbot-client.ts` - AI provider client for chat, streaming, and screen analysis calls.
 - `src/main/quran-foundation-client.ts` - Quran Foundation OAuth, content, and bookmark API client.
@@ -30,7 +30,7 @@ The workspace root contains runtime code, package metadata, and hackathon planni
 
 - Build: from the repo root run `bun run build`, which executes renderer Vite build then main-process TypeScript compile.
 - Tests: Vitest harness with unit and renderer tests (`bun run test`).
-- Capture flow: renderer calls `window.clawster.captureScreenWithContext()` or app-specific IPC; main process captures a temporary screenshot and passes image data to the configured AI provider.
+- Capture flow: renderer calls `window.ayati.captureScreenWithContext()` or app-specific IPC; main process captures a temporary screenshot and passes image data to the configured AI provider.
 - Reflection flow: main process analyzes the screen, ranks candidate ayahs, fetches Quran Foundation content, persists text-only reflection history, and optionally syncs a Quran Foundation bookmark.
 - Settings flow: renderer uses allowlisted IPC writes; main process updates `electron-store` and applies runtime effects such as hotkey and AI provider changes.
 

@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ScreenshotQuestion } from './ScreenshotQuestion';
 
-function installMockClawster(error: Error): void {
-  Object.defineProperty(window, 'clawster', {
+function installMockAyati(error: Error): void {
+  Object.defineProperty(window, 'ayati', {
     configurable: true,
     writable: true,
     value: {
@@ -12,13 +12,13 @@ function installMockClawster(error: Error): void {
       captureAyahReflection: vi.fn().mockRejectedValue(error),
       closeScreenshotQuestion: vi.fn(),
       saveAyahReflection: vi.fn(),
-    } satisfies Partial<Window['clawster']>,
+    } satisfies Partial<Window['ayati']>,
   });
 }
 
 describe('ScreenshotQuestion', () => {
   beforeEach(() => {
-    installMockClawster(new Error(
+    installMockAyati(new Error(
       "Error invoking remote method 'ayah-capture-reflection': Error: AI provider error 400: This model does not support image input.",
     ));
   });

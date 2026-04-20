@@ -1,4 +1,5 @@
 import type { OnboardingData } from '../Onboarding';
+import { OnboardingIcon } from '../OnboardingIcon';
 import { HotkeyInput } from '../../components/HotkeyInput';
 
 interface Props {
@@ -11,40 +12,47 @@ interface Props {
 
 export const HotkeysStep: React.FC<Props> = ({ data, updateData }) => {
   return (
-    <div className="h-full px-8 pt-8">
-      <h2 className="text-2xl font-semibold tracking-tight text-[#07120f] mb-2">Keyboard shortcuts</h2>
-      <p className="text-sm text-[#2b4b40] mb-6">
-        Customize hotkeys to open Ayati - Quran Desktop Companion quickly.
-      </p>
-
-      <div className="space-y-1 divide-y divide-[#07120f]/10">
-        <HotkeyInput
-          label="Open Chat"
-          description="Summon the quick chat bar"
-          value={data.hotkeyOpenChat}
-          onChange={(value) => updateData({ hotkeyOpenChat: value })}
-          theme="setupInverted"
-        />
-        <HotkeyInput
-          label="Reflect on Screen"
-          description="Capture your screen and receive a fitting ayah"
-          value={data.hotkeyCaptureScreen}
-          onChange={(value) => updateData({ hotkeyCaptureScreen: value })}
-          theme="setupInverted"
-        />
-        <HotkeyInput
-          label="Open Assistant"
-          description="Open the full assistant panel"
-          value={data.hotkeyOpenAssistant}
-          onChange={(value) => updateData({ hotkeyOpenAssistant: value })}
-          theme="setupInverted"
-        />
+    <div className="min-h-full px-12 pt-12 pb-12">
+      <div className="space-y-3 mb-10">
+        <p className="brand-display text-[10px] font-bold tracking-[0.2em] text-[#67E0A3] uppercase">Step 03</p>
+        <h2 className="text-[32px] font-semibold tracking-tight text-[#1a2a24]">Flow Shortcuts</h2>
+        <p className="text-[15px] text-[#1a2a24]/60 max-w-[440px] leading-relaxed font-medium">
+          Access reflections and chat instantly without breaking your current workflow.
+        </p>
       </div>
 
-      <div className="mt-6 px-3 py-2 bg-[#7CF0BD]/70 border border-[#07120f]/15 rounded-lg">
-        <p className="text-xs text-[#4f7064]">
-          <iconify-icon icon="solar:info-circle-linear" width="0.875rem" className="inline mr-1.5 align-text-bottom"></iconify-icon>
-          Click on a shortcut and press your desired key combination to change it.
+      <div className="space-y-4">
+        <div className="p-2 rounded-[40px] bg-white border border-[#1a2a24]/[0.03]">
+          <HotkeyInput
+            label="Open Chat"
+            description="Summon the quick chat bar"
+            value={data.hotkeyOpenChat}
+            onChange={(value) => updateData({ hotkeyOpenChat: value })}
+            theme="setupInverted"
+          />
+          <div className="h-px bg-[#1a2a24]/[0.05] mx-6" />
+          <HotkeyInput
+            label="Open Assistant"
+            description="Open the full assistant panel"
+            value={data.hotkeyOpenAssistant}
+            onChange={(value) => updateData({ hotkeyOpenAssistant: value })}
+            theme="setupInverted"
+          />
+          <div className="h-px bg-[#1a2a24]/[0.05] mx-6" />
+          <HotkeyInput
+            label="Reflect on Screen"
+            description="Capture your screen for a fitting ayah"
+            value={data.hotkeyCaptureScreen}
+            onChange={(value) => updateData({ hotkeyCaptureScreen: value })}
+            theme="setupInverted"
+          />
+        </div>
+      </div>
+
+      <div className="mt-8 px-5 py-4 bg-[#67E0A3]/[0.05] border border-[#67E0A3]/15 rounded-[24px]">
+        <p className="text-xs text-[#1a2a24]/50 flex items-center gap-3 font-medium">
+          <OnboardingIcon name="mouse" size="1.25rem" className="text-[#67E0A3]" />
+          Click a shortcut and press your desired keys to change it.
         </p>
       </div>
     </div>

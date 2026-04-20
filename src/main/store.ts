@@ -23,8 +23,8 @@ interface ChatMessage {
 interface OnboardingState {
   completed: boolean;
   skipped: boolean;
-  workspaceType: 'clawster' | null;
-  clawsterWorkspacePath: string | null;
+  workspaceType: 'ayati' | null;
+  ayatiWorkspacePath: string | null;
   memoryMigrated: boolean;
 }
 
@@ -110,7 +110,7 @@ export function createDefaultStoreSchema(): StoreSchema {
       completed: false,
       skipped: false,
       workspaceType: null,
-      clawsterWorkspacePath: null,
+      ayatiWorkspacePath: null,
       memoryMigrated: false,
     },
     tutorial: {
@@ -161,7 +161,7 @@ export function migrateLegacyClawBotDefaults(store: StoreAccessor): void {
 export function createStore(): Store<StoreSchema> {
   const store = new Store<StoreSchema>({
     defaults: createDefaultStoreSchema(),
-    name: 'clawster-config',
+    name: 'ayati-config',
   });
 
   migrateLegacyClawBotDefaults(store);

@@ -1,7 +1,7 @@
 export const DEFAULT_HOTKEYS = {
-  openChat: 'CommandOrControl+Shift+Space',
-  captureScreen: 'CommandOrControl+Shift+/',
-  openAssistant: 'CommandOrControl+Shift+A',
+  openChat: 'CommandOrControl+Alt+,',
+  captureScreen: 'CommandOrControl+Alt+/',
+  openAssistant: 'CommandOrControl+Alt+.',
 } as const;
 
 const MODIFIER_ALIASES = new Map<string, string>([

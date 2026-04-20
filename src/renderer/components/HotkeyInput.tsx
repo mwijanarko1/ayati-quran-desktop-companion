@@ -43,11 +43,12 @@ export const HotkeyInput: React.FC<HotkeyInputProps> = ({
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const isSetupInverted = theme === 'setupInverted';
-  const labelClassName = isSetupInverted ? 'text-[#12362b]' : 'text-neutral-200';
-  const descriptionClassName = isSetupInverted ? 'text-[#4f7064]' : 'text-neutral-500';
+  const labelClassName = isSetupInverted ? 'text-[#1a2a24]' : 'text-neutral-200';
+  const descriptionClassName = isSetupInverted ? 'text-[#1a2a24]/40' : 'text-neutral-500';
   const buttonClassName = isRecording
     ? getRecordingClassName(isSetupInverted)
     : getIdleClassName(isSetupInverted);
+  const formattedHotkey = formatAcceleratorForDisplay(value);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isRecording) return;
@@ -71,15 +72,6 @@ export const HotkeyInput: React.FC<HotkeyInputProps> = ({
     setIsRecording(false);
   };
 
-  const formatHotkey = (hotkey: string) => {
-    return hotkey
-      .replace('CommandOrControl', '⌘')
-      .replace('Shift', '⇧')
-      .replace('Alt', '⌥')
-      .replace('Space', 'Space')
-      .replace(/\+/g, ' + ');
-  };
-
   return (
     <div className="flex items-center justify-between py-3">
       <div>
@@ -87,16 +79,26 @@ export const HotkeyInput: React.FC<HotkeyInputProps> = ({
         <div className={`text-xs mt-0.5 ${descriptionClassName}`}>{description}</div>
       </div>
       <button
+        aria-label={`Change ${label} shortcut, currently ${formattedHotkey}`}
         onKeyDown={handleKeyDown}
         onClick={() => setIsRecording(true)}
         onBlur={() => setIsRecording(false)}
-        className={`px-3 py-2 rounded-lg text-sm font-mono transition-all min-w-[140px] text-center ${buttonClassName}`}
+        className={`px-3 py-2 rounded-lg text-sm font-mono transition-colors min-w-[140px] text-center ${buttonClassName}`}
       >
-        {isRecording ? 'Press keys…' : formatHotkey(value)}
+        {isRecording ? 'Press keys…' : formattedHotkey}
       </button>
     </div>
   );
 };
+
+export function formatAcceleratorForDisplay(hotkey: string) {
+  return hotkey
+    .replace('CommandOrControl', '⌘')
+    .replace('Shift', '⇧')
+    .replace('Alt', '⌥')
+    .replace('Space', 'Space')
+    .replace(/\+/g, ' + ');
+}
 
 function getAcceleratorKey(e: React.KeyboardEvent): string | null {
   if (NON_TRIGGER_KEYS.has(e.key)) {
@@ -138,7 +140,7 @@ function getAcceleratorKey(e: React.KeyboardEvent): string | null {
 
 function getRecordingClassName(isSetupInverted: boolean) {
   if (isSetupInverted) {
-    return 'bg-[#07120f] border border-[#07120f] text-[#AFF9C9] animate-pulse';
+    return 'bg-[#1a2a24] border border-[#1a2a24] text-white animate-pulse';
   }
 
   return 'bg-[#67E0A3]/15 border border-[#67E0A3] text-[#AFF9C9] animate-pulse';
@@ -146,7 +148,7 @@ function getRecordingClassName(isSetupInverted: boolean) {
 
 function getIdleClassName(isSetupInverted: boolean) {
   if (isSetupInverted) {
-    return 'bg-[#7CF0BD]/75 border border-[#07120f]/15 text-[#07120f] hover:border-[#07120f]/35';
+    return 'bg-[#1a2a24]/05 border border-[#1a2a24]/10 text-[#1a2a24] hover:bg-[#1a2a24]/10';
   }
 
   return 'bg-neutral-900 border border-white/10 text-neutral-300 hover:border-white/20';

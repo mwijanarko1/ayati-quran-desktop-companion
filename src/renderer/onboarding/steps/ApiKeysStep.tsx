@@ -1,4 +1,5 @@
 import type { OnboardingData } from '../Onboarding';
+import { OnboardingIcon } from '../OnboardingIcon';
 import { getAiProviderConfig, type ClawBotProvider } from '../../aiProviderDefaults';
 import { AiProviderSettingsFields } from '../../components/AiProviderSettingsFields';
 
@@ -22,16 +23,21 @@ export const ApiKeysStep: React.FC<Props> = ({ data, updateData }) => {
   };
 
   return (
-    <div className="h-full px-8 pt-8">
-      <h2 className="text-2xl font-semibold tracking-tight text-[#07120f] mb-2">AI Provider</h2>
-      <p className="text-sm text-[#2b4b40] mb-5">
-        Bring your own API key for screenshot reflections. Ayati - Quran Desktop Companion does not ship with a shared OpenRouter key.
-      </p>
+    <div className="min-h-full px-12 pt-12 pb-12">
+      <div className="space-y-3 mb-10">
+        <p className="brand-display text-[10px] font-bold tracking-[0.2em] text-[#67E0A3] uppercase">Step 01</p>
+        <h2 className="text-[32px] font-semibold tracking-tight text-[#1a2a24]">Vision Provider</h2>
+        <p className="text-[15px] text-[#1a2a24]/60 max-w-[440px] leading-relaxed font-medium">
+          Ayati is a local-first application. Connect your own AI account to enable infinite screenshot reflections.
+        </p>
+      </div>
 
-      <div className="rounded-lg border border-[#07120f]/15 bg-[#07120f] p-4 shadow-[0_18px_42px_rgba(7,18,15,0.16)]">
-        <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-          AI Provider
+      <div className="rounded-[40px] bg-[#1a2a24] p-8 relative overflow-hidden">
+        <h3 className="text-[11px] font-bold text-white/60 uppercase tracking-[0.25em] mb-6 flex items-center gap-2">
+          <OnboardingIcon name="key" size="1rem" className="text-[#67E0A3]" />
+          Credentials
         </h3>
+
         <AiProviderSettingsFields
           idPrefix="onboarding-ai-provider"
           provider={data.aiProvider}
@@ -45,10 +51,10 @@ export const ApiKeysStep: React.FC<Props> = ({ data, updateData }) => {
         />
       </div>
 
-      <div className="mt-4 px-3 py-2 bg-[#7CF0BD]/70 border border-[#07120f]/15 rounded-lg">
-        <p className="text-xs text-[#4f7064]">
-          <iconify-icon icon="solar:shield-check-linear" width="0.875rem" className="inline mr-1.5 align-text-bottom"></iconify-icon>
-          Your key is stored on this device and can be changed later in Settings.
+      <div className="mt-8 px-5 py-4 bg-[#67E0A3]/[0.05] border border-[#67E0A3]/15 rounded-[24px]">
+        <p className="text-xs text-[#1a2a24]/50 flex items-center gap-3 font-medium">
+          <OnboardingIcon name="lock" size="1.25rem" className="text-[#67E0A3]" />
+          Your keys are encrypted and stored locally. Ayati never shares them.
         </p>
       </div>
     </div>

@@ -17,14 +17,14 @@ function getCssRuleBody(styles: string, selectorStart: string): string {
   return styles.slice(openBraceIndex + 1, closeBraceIndex);
 }
 
-function installMockClawster(): {
-  clawster: Partial<Window['clawster']>;
+function installMockAyati(): {
+  ayati: Partial<Window['ayati']>;
   sendMood: (data: { state: string; reason?: string }) => void;
   sendIdleBehavior: (data: { type: string; direction?: string }) => void;
 } {
   let moodHandler: (data: { state: string; reason?: string }) => void = () => {};
   let idleBehaviorHandler: (data: { type: string; direction?: string }) => void = () => {};
-  const clawster = {
+  const ayati = {
     getSettings: vi.fn().mockResolvedValue({
       pet: { transparentWhenSleeping: false },
       dev: { showPetModeOverlay: false },
@@ -56,16 +56,16 @@ function installMockClawster(): {
     onTutorialEnded: vi.fn(),
     onTutorialResumePrompt: vi.fn(),
     onTutorialHint: vi.fn(),
-  } satisfies Partial<Window['clawster']>;
+  } satisfies Partial<Window['ayati']>;
 
-  Object.defineProperty(window, 'clawster', {
+  Object.defineProperty(window, 'ayati', {
     configurable: true,
     writable: true,
-    value: clawster,
+    value: ayati,
   });
 
   return {
-    clawster,
+    ayati,
     sendMood: (data) => moodHandler(data),
     sendIdleBehavior: (data) => idleBehaviorHandler(data),
   };
@@ -73,7 +73,7 @@ function installMockClawster(): {
 
 describe('Pet', () => {
   beforeEach(() => {
-    installMockClawster();
+    installMockAyati();
   });
 
   it('renders the Ayati - Quran Desktop Companion character as animated asset layers', () => {
@@ -152,7 +152,7 @@ describe('Pet', () => {
   });
 
   it('ignores hand wave idle events while the wave behavior is disabled', async () => {
-    const { sendIdleBehavior } = installMockClawster();
+    const { sendIdleBehavior } = installMockAyati();
     render(<Pet />);
 
     await act(async () => {
@@ -167,7 +167,7 @@ describe('Pet', () => {
   });
 
   it('wakes up by moving the pet window when tapped while sleeping', async () => {
-    const { clawster, sendMood } = installMockClawster();
+    const { ayati, sendMood } = installMockAyati();
     render(<Pet />);
 
     await act(async () => {
@@ -188,8 +188,8 @@ describe('Pet', () => {
     expect(characterShell).not.toHaveClass('wake-flip');
     expect(characterShell).not.toHaveClass('idle-wave');
     expect(characterShell).not.toHaveClass('state-sleep');
-    expect(clawster.playPetWakeFlight).toHaveBeenCalled();
-    expect(clawster.petClicked).toHaveBeenCalled();
+    expect(ayati.playPetWakeFlight).toHaveBeenCalled();
+    expect(ayati.petClicked).toHaveBeenCalled();
   });
 
   it('does not define hand wave animation rules while wave is disabled', () => {
@@ -222,5 +222,22 @@ describe('Pet', () => {
 
     expect(leftSleepHandRule).not.toMatch(/translate\([^)]*,\s*[1-9][\d.]*px\)/);
     expect(rightSleepHandRule).not.toMatch(/translate\([^)]*,\s*[1-9][\d.]*px\)/);
+  });
+
+  it('leans the tucked wings with the dozing sleep pose', () => {
+    const styles = readFileSync(path.join(process.cwd(), 'src/renderer/pet/styles.css'), 'utf8');
+    const leftDozeWingRule = getCssRuleBody(
+      styles,
+      '.lobster-container.state-doze .character-left-wing',
+    );
+    const rightDozeWingRule = getCssRuleBody(
+      styles,
+      '.lobster-container.state-doze .character-right-wing',
+    );
+
+    expect(leftDozeWingRule).toContain('dozeLeftWingLean');
+    expect(rightDozeWingRule).toContain('dozeRightWingLean');
+    expect(styles).toContain('@keyframes dozeLeftWingLean');
+    expect(styles).toContain('@keyframes dozeRightWingLean');
   });
 });

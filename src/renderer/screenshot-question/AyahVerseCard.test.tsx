@@ -35,4 +35,69 @@ describe('AyahVerseCard', () => {
 
     expect(handleSave).toHaveBeenCalledTimes(1);
   });
+
+  it('exposes tafsir, audio, note, collection, feedback, alternate, and share actions', async () => {
+    const user = userEvent.setup();
+    const handleLoadTafsir = vi.fn().mockResolvedValue(undefined);
+    const handleLoadAudio = vi.fn().mockResolvedValue(undefined);
+    const handleSaveNote = vi.fn().mockResolvedValue(undefined);
+    const handleAddToCollection = vi.fn().mockResolvedValue(undefined);
+    const handleFeedback = vi.fn().mockResolvedValue(undefined);
+    const handleAlternate = vi.fn().mockResolvedValue(undefined);
+    const handleShare = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <AyahVerseCard
+        reflection={{
+          ...reflection,
+          tafsir: {
+            resourceId: 169,
+            resourceName: 'Tafsir Ibn Kathir',
+            languageName: 'english',
+            text: 'Allah does not burden any soul beyond capacity.',
+            fetchedAt: 1710000000100,
+          },
+          audio: {
+            recitationId: 1,
+            reciterName: 'Mishari Alafasy',
+            url: 'https://verses.quran.foundation/audio.mp3',
+            fetchedAt: 1710000000200,
+          },
+        }}
+        collections={[{ id: 'collection-1', name: 'Work Stress', syncState: 'synced' }]}
+        onSave={vi.fn()}
+        onLoadTafsir={handleLoadTafsir}
+        onLoadAudio={handleLoadAudio}
+        onSaveNote={handleSaveNote}
+        onAddToCollection={handleAddToCollection}
+        onFeedback={handleFeedback}
+        onShowAlternate={handleAlternate}
+        onShare={handleShare}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /show tafsir/i }));
+    expect(handleLoadTafsir).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Allah does not burden any soul/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /play recitation/i }));
+    expect(handleLoadAudio).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText(/recitation audio/i)).toHaveAttribute('src', 'https://verses.quran.foundation/audio.mp3');
+
+    await user.type(screen.getByLabelText(/reflection note/i), 'This helped me slow down.');
+    await user.click(screen.getByRole('button', { name: /save note/i }));
+    expect(handleSaveNote).toHaveBeenCalledWith('This helped me slow down.');
+
+    await user.selectOptions(screen.getByLabelText(/save to collection/i), 'collection-1');
+    expect(handleAddToCollection).toHaveBeenCalledWith('collection-1');
+
+    await user.click(screen.getByRole('button', { name: 'Relevant' }));
+    expect(handleFeedback).toHaveBeenCalledWith('relevant');
+
+    await user.click(screen.getByRole('button', { name: /show another ayah/i }));
+    expect(handleAlternate).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: /copy share card/i }));
+    expect(handleShare).toHaveBeenCalledTimes(1);
+  });
 });
