@@ -3,11 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Clawster Onboarding</title>
+    <link rel="icon" type="image/png" href="../../assets/icon.png" />
+    <title>Ayati - Quran Desktop Companion Setup</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fira+Code:wght@400;500&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Amiri+Quran&display=swap');
 
       * {
         margin: 0;
@@ -22,13 +23,24 @@
       }
 
       body {
-        font-family: 'Inter', sans-serif;
-        background-color: #0a0a0a;
-        color: #ededed;
+        font-family: 'Source Sans 3', sans-serif;
+        background-color: #AFF9C9;
+        color: #07120f;
         display: flex;
         align-items: center;
         justify-content: center;
         -webkit-font-smoothing: antialiased;
+      }
+
+      h1,
+      h2,
+      .brand-display {
+        font-family: 'Sora', sans-serif;
+      }
+
+      code,
+      .font-mono {
+        font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
       }
 
       /* Animations */
@@ -66,13 +78,13 @@
         scrollbar-width: none;
       }
 
-      /* Custom input autocomplete styling for dark mode */
+      /* Custom input autocomplete styling for setup theme */
       input:-webkit-autofill,
       input:-webkit-autofill:hover,
       input:-webkit-autofill:focus,
       input:-webkit-autofill:active {
-        -webkit-box-shadow: 0 0 0 30px #171717 inset !important;
-        -webkit-text-fill-color: #ededed !important;
+        -webkit-box-shadow: 0 0 0 30px #AFF9C9 inset !important;
+        -webkit-text-fill-color: #07120f !important;
         transition: background-color 5000s ease-in-out 0s;
       }
 

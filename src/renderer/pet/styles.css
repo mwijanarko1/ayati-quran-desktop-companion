@@ -200,6 +200,20 @@
   overflow: visible;
 }
 
+.lobster-container .character-layer {
+  pointer-events: none;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.lobster-container .character-halo-layer {
+  animation: haloFloat 4s ease-in-out infinite;
+}
+
+.lobster-container .character-face-overlay {
+  pointer-events: none;
+}
+
 .lobster-container:hover {
   transform: scale(1.05);
 }
@@ -472,6 +486,16 @@
   }
   50% {
     transform: translateY(-15px);
+  }
+}
+
+@keyframes haloFloat {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-2px) scale(1.02);
   }
 }
 
@@ -1253,4 +1277,224 @@
   100% {
     transform: translateY(0) rotate(0deg);
   }
+}
+
+/* Character-specific motion overrides */
+.lobster-container .character-left-wing,
+.lobster-container .character-right-wing,
+.lobster-container .character-left-hand-top-layer,
+.lobster-container .character-right-hand-top-layer {
+  transform-box: fill-box;
+  will-change: transform;
+}
+
+.lobster-container .character-left-wing {
+  transform-origin: 88% 44%;
+}
+
+.lobster-container .character-right-wing {
+  transform-origin: 12% 44%;
+}
+
+.lobster-container .character-left-hand-top-layer {
+  transform-origin: 46% 18%;
+}
+
+.lobster-container .character-right-hand-top-layer {
+  transform-origin: 54% 18%;
+}
+
+.lobster-container.state-idle .character-left-wing {
+  animation: leftWingFlap 1.55s ease-in-out infinite;
+}
+
+.lobster-container.state-idle .character-right-wing {
+  animation: rightWingFlap 1.55s ease-in-out infinite;
+}
+
+.lobster-container.state-idle .character-left-hand-top-layer {
+  animation: leftHandFloat 3.2s ease-in-out infinite;
+}
+
+.lobster-container.state-idle .character-right-hand-top-layer {
+  animation: rightHandFloat 3.2s ease-in-out infinite 0.18s;
+}
+
+.lobster-container.state-happy .character-left-wing,
+.lobster-container.state-walking .character-left-wing,
+.lobster-container.state-snip .character-left-wing {
+  animation: leftWingFlap 0.55s ease-in-out infinite;
+}
+
+.lobster-container.state-happy .character-right-wing,
+.lobster-container.state-walking .character-right-wing,
+.lobster-container.state-snip .character-right-wing {
+  animation: rightWingFlap 0.55s ease-in-out infinite;
+}
+
+.lobster-container.state-happy .character-left-hand-top-layer {
+  transform: translateY(-8px) rotate(-10deg);
+}
+
+.lobster-container.state-happy .character-right-hand-top-layer {
+  transform: translateY(-8px) rotate(10deg);
+}
+
+.lobster-container.state-sleep .character-left-wing,
+.lobster-container.state-doze .character-left-wing {
+  animation: none;
+  transform: translate(3px, 5px) rotate(8deg) scaleY(0.94);
+}
+
+.lobster-container.state-sleep .character-right-wing,
+.lobster-container.state-doze .character-right-wing {
+  animation: none;
+  transform: translate(-3px, 5px) rotate(-8deg) scaleY(0.94);
+}
+
+.lobster-container.state-sleep .character-left-hand-top-layer,
+.lobster-container.state-doze .character-left-hand-top-layer {
+  animation: none;
+  transform: translateX(4px) rotate(8deg);
+}
+
+.lobster-container.state-sleep .character-right-hand-top-layer,
+.lobster-container.state-doze .character-right-hand-top-layer {
+  animation: none;
+  transform: translateX(-4px) rotate(-8deg);
+}
+
+.lobster-container.state-startle .character-left-hand-top-layer {
+  animation: none;
+  transform: translateY(-14px) rotate(-18deg);
+}
+
+.lobster-container.state-startle .character-right-hand-top-layer {
+  animation: none;
+  transform: translateY(-14px) rotate(18deg);
+}
+
+.lobster-container.state-snip .character-right-hand-top-layer,
+.lobster-container.state-tap .character-right-hand-top-layer {
+  animation: rightHandTap 0.36s ease-in-out infinite;
+}
+
+.lobster-container.state-walking .character-left-hand-top-layer {
+  animation: leftHandWalk 0.48s ease-in-out infinite;
+}
+
+.lobster-container.state-walking .character-right-hand-top-layer {
+  animation: rightHandWalk 0.48s ease-in-out infinite;
+}
+
+.lobster-container.action-camera-snap .character-left-hand-top-layer {
+  animation: cameraLeftHand 920ms cubic-bezier(0.22, 0.7, 0.2, 1) both;
+}
+
+.lobster-container.action-camera-snap .character-right-hand-top-layer {
+  animation: cameraRightHand 920ms cubic-bezier(0.22, 0.7, 0.2, 1) both;
+}
+
+@keyframes leftWingFlap {
+  0%,
+  100% {
+    transform: rotate(-5deg) translateY(0);
+  }
+  50% {
+    transform: rotate(12deg) translateY(-7px);
+  }
+}
+
+@keyframes rightWingFlap {
+  0%,
+  100% {
+    transform: rotate(5deg) translateY(0);
+  }
+  50% {
+    transform: rotate(-12deg) translateY(-7px);
+  }
+}
+
+@keyframes leftHandFloat {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-3px) rotate(4deg);
+  }
+}
+
+@keyframes rightHandFloat {
+  0%,
+  100% {
+    transform: translateY(0) rotate(2deg);
+  }
+  50% {
+    transform: translateY(-3px) rotate(-4deg);
+  }
+}
+
+@keyframes rightHandTap {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(6px) rotate(10deg);
+  }
+}
+
+@keyframes leftHandWalk {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-4deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(6deg);
+  }
+}
+
+@keyframes rightHandWalk {
+  0%,
+  100% {
+    transform: translateY(-5px) rotate(-6deg);
+  }
+  50% {
+    transform: translateY(0) rotate(4deg);
+  }
+}
+
+@keyframes cameraLeftHand {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  56%,
+  72% {
+    transform: translate(-4px, -10px) rotate(-22deg);
+  }
+}
+
+@keyframes cameraRightHand {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  56%,
+  72% {
+    transform: translate(4px, -10px) rotate(22deg);
+  }
+}
+
+.lobster-container.wake-window-flight {
+  will-change: auto;
+}
+
+.lobster-container.wake-window-flight .mouth-neutral {
+  opacity: 0;
+}
+
+.lobster-container.wake-window-flight .mouth-happy {
+  opacity: 1;
 }

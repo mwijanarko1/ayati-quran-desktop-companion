@@ -4,4 +4,5 @@ release/
 .DS_Store
 *.log
 .env
+.env.local
 electron-builder.env

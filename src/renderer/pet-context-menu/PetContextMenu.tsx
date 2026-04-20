@@ -22,11 +22,10 @@ const MENU_ITEMS: MenuItem[] = [
 ];
 
 const SOCIAL_LINKS: SocialLink[] = [
-  { label: 'GitHub', icon: 'simple-icons:github', url: 'https://github.com/wuyuwenj/clawster' },
-  { label: 'X', icon: 'simple-icons:x', url: 'https://x.com/clawsterpet' },
+  { label: 'GitHub', icon: 'simple-icons:github', url: 'https://github.com/mwijanarko1/ayati-quran-desktop-companion' },
   { label: 'Discord', icon: 'simple-icons:discord', url: 'https://discord.gg/qWqJYsw3M3' },
 ];
-const FEEDBACK_URL = 'https://clawster.canny.io/clawster-feedback';
+const FEEDBACK_URL = 'https://github.com/mwijanarko1/ayati-quran-desktop-companion/issues';
 
 export const PetContextMenu: React.FC = () => {
   const handleClick = (action: MenuAction) => {
@@ -93,7 +92,7 @@ export const PetContextMenu: React.FC = () => {
           onClick={() => handleClick('quit')}
         >
           <Icon icon="solar:power-linear" width="16" height="16" />
-          <span>Quit Clawster</span>
+          <span>Quit Ayati - Quran Desktop Companion</span>
         </button>
       </div>
     </div>

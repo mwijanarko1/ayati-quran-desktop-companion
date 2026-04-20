@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { ClawBotProvider } from './ai-providers';
 
 // Expose protected methods to renderer
 contextBridge.exposeInMainWorld('clawster', {
@@ -20,13 +21,14 @@ contextBridge.exposeInMainWorld('clawster', {
 
   // Pet dragging
   dragPet: (deltaX: number, deltaY: number) => ipcRenderer.send('pet-drag', deltaX, deltaY),
+  playPetWakeFlight: () => ipcRenderer.invoke('pet-wake-flight'),
   // Pet chat popup
-  showPetChat: (message: { id: string; text: string; quickReplies?: string[] }) =>
+  showPetChat: (message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) =>
     ipcRenderer.send('show-pet-chat', message),
   hidePetChat: () => ipcRenderer.send('hide-pet-chat'),
   resizePetChat: (width: number, height: number) => ipcRenderer.send('resize-pet-chat', width, height),
   petChatInteracted: () => ipcRenderer.send('pet-chat-interacted'),
-  onPetChatMessage: (callback: (message: { id: string; text: string; quickReplies?: string[] }) => void) => {
+  onPetChatMessage: (callback: (message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) => void) => {
     ipcRenderer.on('chat-message', (_event, message) => callback(message));
   },
   petChatReply: (reply: string) => ipcRenderer.send('pet-chat-reply', reply),
@@ -46,6 +48,21 @@ contextBridge.exposeInMainWorld('clawster', {
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   updateSettings: (key: string, value: unknown) => ipcRenderer.invoke('update-settings', key, value),
+
+  // Ayati - Quran Desktop Companion
+  startQuranOAuth: () => ipcRenderer.invoke('quran-auth-start'),
+  completeQuranOAuthCallback: (callbackUrl: string) => ipcRenderer.invoke('quran-auth-complete', callbackUrl),
+  getQuranAuthStatus: () => ipcRenderer.invoke('quran-auth-status'),
+  disconnectQuranAccount: () => ipcRenderer.invoke('quran-auth-disconnect'),
+  captureAyahReflection: () => ipcRenderer.invoke('ayah-capture-reflection'),
+  saveAyahReflection: (reflectionId: string) => ipcRenderer.invoke('ayah-save-reflection', reflectionId),
+  getAyahReflectionHistory: () => ipcRenderer.invoke('ayah-history'),
+  deleteAyahReflection: (reflectionId: string) => ipcRenderer.invoke('ayah-delete-reflection', reflectionId),
+  getAyahLensSettings: () => ipcRenderer.invoke('ayah-settings-get'),
+  updateAyahLensSetting: (key: string, value: unknown) => ipcRenderer.invoke('ayah-settings-update', key, value),
+  onAyahOAuthCallback: (callback: (callbackUrl: string) => void) => {
+    ipcRenderer.on('ayah-oauth-callback', (_event, callbackUrl) => callback(String(callbackUrl)));
+  },
 
   // Chat history
   getChatHistory: () => ipcRenderer.invoke('get-chat-history'),
@@ -166,13 +183,11 @@ contextBridge.exposeInMainWorld('clawster', {
   // Onboarding
   onboardingSkip: () => ipcRenderer.invoke('onboarding-skip'),
   onboardingComplete: (data: {
-    workspaceType: 'openclaw' | 'clawster';
-    migrateMemory: boolean;
     launchOnStartup: boolean;
+    aiProvider?: ClawBotProvider;
     gatewayUrl: string;
     gatewayToken: string;
-    identity: string;
-    soul: string;
+    gatewayModel?: string;
     watchFolders: string[];
     watchActiveApp: boolean;
     watchWindowTitles: boolean;
@@ -180,18 +195,12 @@ contextBridge.exposeInMainWorld('clawster', {
     hotkeyCaptureScreen: string;
     hotkeyOpenAssistant: string;
   }) => ipcRenderer.invoke('onboarding-complete', data),
-  readOpenClawConfig: () => ipcRenderer.invoke('read-openclaw-config'),
-  readOpenClawWorkspace: () => ipcRenderer.invoke('read-openclaw-workspace'),
-  createClawsterWorkspace: (options: {
-    identity: string;
-    soul: string;
-    migrateMemory: boolean;
-  }) => ipcRenderer.invoke('create-clawster-workspace', options),
-  validateGateway: (url: string, token: string) =>
-    ipcRenderer.invoke('validate-gateway', url, token),
-  getDefaultPersonality: () => ipcRenderer.invoke('get-default-personality'),
-  savePersonality: (workspacePath: string, identity: string, soul: string) =>
-    ipcRenderer.invoke('save-personality', workspacePath, identity, soul),
+  validateGateway: (
+    url: string,
+    token: string,
+    provider?: ClawBotProvider,
+    model?: string
+  ) => ipcRenderer.invoke('validate-gateway', url, token, provider, model),
   getOnboardingStatus: () => ipcRenderer.invoke('get-onboarding-status'),
   resetOnboarding: () => ipcRenderer.invoke('reset-onboarding'),
 
@@ -215,6 +224,7 @@ contextBridge.exposeInMainWorld('clawster', {
     ipcRenderer.removeAllListeners('chat-sync');
     ipcRenderer.removeAllListeners('switch-to-chat');
     ipcRenderer.removeAllListeners('switch-to-settings');
+    ipcRenderer.removeAllListeners('ayah-oauth-callback');
     ipcRenderer.removeAllListeners('tutorial-step');
     ipcRenderer.removeAllListeners('tutorial-hint');
     ipcRenderer.removeAllListeners('tutorial-ended');
@@ -238,14 +248,62 @@ export interface ScreenContext {
   image?: string;
 }
 
+export type AyahTheme =
+  | 'stress'
+  | 'focus'
+  | 'gratitude'
+  | 'beauty'
+  | 'patience'
+  | 'risk'
+  | 'excess'
+  | 'conflict'
+  | 'study'
+  | 'planning'
+  | 'work'
+  | 'distraction'
+  | 'unclear';
+
+export interface AyahReflection {
+  id: string;
+  verseKey: string;
+  surahName: string;
+  ayahNumber: number;
+  arabicText: string;
+  translation: string;
+  translatorId: number;
+  reflection: string;
+  whyThisVerse: string;
+  screenSummary: string;
+  themes: Array<{ id: AyahTheme; confidence: number }>;
+  createdAt: number;
+  savedAt?: number;
+  quranBookmarkId?: string;
+  syncState: 'local' | 'synced' | 'pending' | 'failed';
+}
+
+export interface QuranAuthStatus {
+  isConnected: boolean;
+  userName?: string;
+  scopes: string[];
+  expiresAt?: number;
+  error?: string;
+}
+
+export interface AyahLensSettings {
+  translationId: number;
+  mushafId: number;
+  captureMode: 'fullScreen';
+  saveScreenshots: false;
+  defaultSave: boolean;
+}
+
 export interface OnboardingData {
-  workspaceType: 'openclaw' | 'clawster';
-  migrateMemory: boolean;
+  workspaceType: 'clawster';
   launchOnStartup: boolean;
+  aiProvider?: ClawBotProvider;
   gatewayUrl: string;
   gatewayToken: string;
-  identity: string;
-  soul: string;
+  gatewayModel?: string;
   watchFolders: string[];
   watchActiveApp: boolean;
   watchWindowTitles: boolean;
@@ -254,15 +312,8 @@ export interface OnboardingData {
   hotkeyOpenAssistant: string;
 }
 
-export interface OpenClawWorkspace {
-  exists: boolean;
-  identity: string | null;
-  soul: string | null;
-  hasMemory: boolean;
-}
-
 export interface CurrentWorkspaceInfo {
-  workspaceType: 'openclaw' | 'clawster' | null;
+  workspaceType: 'clawster' | null;
   workspacePath: string | null;
   exists: boolean;
 }
@@ -313,11 +364,12 @@ export interface ClawsterAPI {
   closeScreenshotQuestion: () => void;
   askAboutScreen: (question: string, imageDataUrl: string) => Promise<unknown>;
   dragPet: (deltaX: number, deltaY: number) => void;
-  showPetChat: (message: { id: string; text: string; quickReplies?: string[] }) => void;
+  playPetWakeFlight: () => Promise<void>;
+  showPetChat: (message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) => void;
   hidePetChat: () => void;
   resizePetChat: (width: number, height: number) => void;
   petChatInteracted: () => void;
-  onPetChatMessage: (callback: (message: { id: string; text: string; quickReplies?: string[] }) => void) => void;
+  onPetChatMessage: (callback: (message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) => void) => void;
   petChatReply: (reply: string) => void;
   onPetChatReply: (callback: (reply: string) => void) => void;
   openExternal: (url: string) => void;
@@ -329,6 +381,17 @@ export interface ClawsterAPI {
   previewWorkspaceFile: (relativePath?: string) => Promise<WorkspacePreviewResult>;
   getSettings: () => Promise<unknown>;
   updateSettings: (key: string, value: unknown) => Promise<unknown>;
+  startQuranOAuth: () => Promise<{ authorizeUrl: string }>;
+  completeQuranOAuthCallback: (callbackUrl: string) => Promise<QuranAuthStatus>;
+  getQuranAuthStatus: () => Promise<QuranAuthStatus>;
+  disconnectQuranAccount: () => Promise<boolean>;
+  captureAyahReflection: () => Promise<AyahReflection>;
+  saveAyahReflection: (reflectionId: string) => Promise<AyahReflection | null>;
+  getAyahReflectionHistory: () => Promise<AyahReflection[]>;
+  deleteAyahReflection: (reflectionId: string) => Promise<boolean>;
+  getAyahLensSettings: () => Promise<AyahLensSettings>;
+  updateAyahLensSetting: (key: string, value: unknown) => Promise<AyahLensSettings>;
+  onAyahOAuthCallback: (callback: (callbackUrl: string) => void) => void;
   getChatHistory: () => Promise<unknown[]>;
   saveChatHistory: (messages: unknown[]) => Promise<boolean>;
   clearChatHistory: () => Promise<boolean>;
@@ -383,16 +446,12 @@ export interface ClawsterAPI {
   // Onboarding
   onboardingSkip: () => Promise<boolean>;
   onboardingComplete: (data: OnboardingData) => Promise<boolean>;
-  readOpenClawConfig: () => Promise<{ gateway?: { port?: number; auth?: { token?: string } } } | null>;
-  readOpenClawWorkspace: () => Promise<OpenClawWorkspace>;
-  createClawsterWorkspace: (options: {
-    identity: string;
-    soul: string;
-    migrateMemory: boolean;
-  }) => Promise<{ success: boolean; path?: string; error?: string }>;
-  validateGateway: (url: string, token: string) => Promise<{ success: boolean; error?: string }>;
-  getDefaultPersonality: () => Promise<{ identity: string; soul: string }>;
-  savePersonality: (workspacePath: string, identity: string, soul: string) => Promise<{ success: boolean; error?: string }>;
+  validateGateway: (
+    url: string,
+    token: string,
+    provider?: ClawBotProvider,
+    model?: string
+  ) => Promise<{ success: boolean; error?: string }>;
   getOnboardingStatus: () => Promise<{ completed: boolean; skipped: boolean }>;
   resetOnboarding: () => Promise<boolean>;
   removeAllListeners: () => void;

@@ -1,4 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import bodyUrl from '../../../assets/character/body.svg';
+import headUrl from '../../../assets/character/head.svg';
+import leftHandUrl from '../../../assets/character/left-hand.svg';
+import leftWingUrl from '../../../assets/character/left-wing.svg';
+import legUrl from '../../../assets/character/leg.svg';
+import rightHandUrl from '../../../assets/character/right-hand.svg';
+import rightWingUrl from '../../../assets/character/right-wing.svg';
 import { TutorialOverlay } from './TutorialOverlay';
 
 type Mood = 'idle' | 'happy' | 'curious' | 'sleeping' | 'thinking' | 'excited' | 'doze' | 'startle' | 'proud' | 'mad' | 'spin' | 'mouth_o';
@@ -10,10 +17,32 @@ interface ChatMessage {
   content?: string;
   trigger?: 'app_switch' | 'idle' | 'proactive' | 'suggestion';
   quickReplies?: string[];
+  reflectionId?: string;
 }
 
 const DEFAULT_QUICK_REPLIES = ['Thanks!', 'Tell me more', 'Not now'];
 const isSleepMood = (nextMood: Mood): boolean => nextMood === 'sleeping' || nextMood === 'doze';
+const WAKE_WINDOW_FLIGHT_DURATION_MS = 1100;
+const IDLE_BEHAVIOR_DURATIONS_MS: Record<NonNullable<IdleBehavior>, number> = {
+  blink: 400,
+  look_around: 2000,
+  snip_claws: 1500,
+  yawn: 2500,
+  stretch: 2000,
+  wiggle: 1200,
+  wander: 2500,
+};
+const IDLE_BEHAVIORS = new Set<string>(Object.keys(IDLE_BEHAVIOR_DURATIONS_MS));
+
+const getIdleBehaviorDuration = (idleBehavior: IdleBehavior): number => {
+  if (!idleBehavior) return 1500;
+  return IDLE_BEHAVIOR_DURATIONS_MS[idleBehavior];
+};
+
+const isIdleBehavior = (nextIdleBehavior: string | null | undefined): nextIdleBehavior is NonNullable<IdleBehavior> => (
+  Boolean(nextIdleBehavior && IDLE_BEHAVIORS.has(nextIdleBehavior))
+);
+const shouldReduceMotion = (): boolean => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
 // Map internal moods to lobster animation states
 const moodToState = (mood: Mood): string => {
@@ -44,102 +73,100 @@ const moodToState = (mood: Mood): string => {
   }
 };
 
-interface LobsterSvgProps {
+interface CharacterSvgProps {
   pupilOffset: { x: number; y: number } | null;
 }
 
-const LobsterSvg: React.FC<LobsterSvgProps> = ({ pupilOffset }) => (
-  <svg viewBox="0 0 128 128">
-    {/* Tail */}
-    <path
-      className="tail"
-      d="M 50 100 Q 64 125 78 100 Z"
-      fill="var(--salmon)"
-      stroke="var(--dark-red)"
-      strokeWidth="4"
-      strokeLinejoin="round"
-    />
-    {/* Left Claw */}
-    <g className="left-claw">
-      <path
-        d="M 40 55 A 24 24 0 1 1 10 85 Q 20 80 25 75 Q 20 65 30 70 Z"
-        fill="var(--salmon)"
-        stroke="var(--dark-red)"
-        strokeWidth="4"
-        strokeLinejoin="round"
-      />
+const CharacterSvg: React.FC<CharacterSvgProps> = ({ pupilOffset }) => (
+  <svg viewBox="0 0 128 128" data-testid="ayah-character-pet" aria-hidden="true">
+
+    <g className="left-claw character-left-wing" data-testid="character-left-wing-layer">
+      <image className="character-layer" href={leftWingUrl} x="-16" y="44" width="64" height="64" />
     </g>
-    {/* Right Claw */}
-    <g className="right-claw">
-      <path
-        d="M 88 55 A 24 24 0 1 0 118 85 Q 108 80 103 75 Q 108 65 98 70 Z"
-        fill="var(--salmon)"
-        stroke="var(--dark-red)"
-        strokeWidth="4"
-        strokeLinejoin="round"
-      />
+
+    <g className="right-claw character-right-wing" data-testid="character-right-wing-layer">
+      <image className="character-layer" href={rightWingUrl} x="76" y="44" width="64" height="64" />
     </g>
-    {/* Body Group */}
+
     <g className="body-group">
-      <rect
-        x="34"
-        y="28"
-        width="60"
-        height="75"
-        rx="30"
-        fill="var(--salmon)"
-        stroke="var(--dark-red)"
-        strokeWidth="4"
+      <image
+        data-testid="character-leg-layer"
+        className="character-layer character-leg-layer"
+        href={legUrl}
+        x="5"
+        y="70"
+        width="84"
+        height="84"
       />
-      {/* Belt/Band */}
-      <path
-        d="M 34 82 Q 64 92 94 82 L 94 88 Q 64 98 34 88 Z"
-        fill="var(--teal)"
-        stroke="var(--teal-dark)"
-        strokeWidth="2"
+      <image
+        data-testid="character-leg-layer"
+        className="character-layer character-leg-layer"
+        href={legUrl}
+        x="35"
+        y="70"
+        width="84"
+        height="84"
       />
-      {/* Belt buckle */}
-      <path
-        d="M 75 85 L 88 108 L 68 102 Z"
-        fill="var(--teal)"
-        stroke="var(--teal-dark)"
-        strokeWidth="2"
-        strokeLinejoin="round"
+      <image
+        data-testid="character-body-layer"
+        className="character-layer character-body-layer"
+        href={bodyUrl}
+        x="0"
+        y="10"
+        width="128"
+        height="128"
       />
-      {/* Face */}
-      <g className="face">
-        {/* Eyes Open */}
-        <g className="eye-open">
-          <circle cx="48" cy="55" r="7" fill="var(--ink)" />
-          <circle cx="80" cy="55" r="7" fill="var(--ink)" />
+      <image
+        data-testid="character-head-layer"
+        className="character-layer character-head-layer"
+        href={headUrl}
+        x="0"
+        y="-30"
+        width="128"
+        height="128"
+      />
+
+      <g className="face character-face-overlay" transform="translate(-5 -15)">
+        <g className="eye-open" data-testid="character-eye-open-layer">
+          <ellipse className="character-eye-shell character-eye-shell-left" cx="49" cy="58" rx="8.8" ry="10.2" fill="#173f43" />
+          <ellipse className="character-eye-shell character-eye-shell-right" cx="83" cy="58" rx="8.8" ry="10.2" fill="#173f43" />
+          <ellipse className="character-eye-glow character-eye-glow-left" cx="49" cy="63.5" rx="6.7" ry="3.6" fill="#8ee5c4" opacity="0.48" />
+          <ellipse className="character-eye-glow character-eye-glow-right" cx="83" cy="63.5" rx="6.7" ry="3.6" fill="#8ee5c4" opacity="0.48" />
           <g
-            className="pupils"
+            className="pupils character-eye-focus"
             style={pupilOffset ? { transform: `translate(${pupilOffset.x}px, ${pupilOffset.y}px)` } : undefined}
           >
-            <circle cx="46" cy="53" r="2.5" fill="#FFF" />
-            <circle cx="78" cy="53" r="2.5" fill="#FFF" />
+            <g className="character-eye-pupil character-eye-pupil-left">
+              <ellipse cx="49" cy="58.6" rx="5.1" ry="6.2" fill="#0d3034" />
+              <ellipse className="character-eye-highlight" cx="46.2" cy="54.6" rx="2.5" ry="1.35" fill="#dfffe9" transform="rotate(-32 46.2 54.6)" />
+              <ellipse className="character-eye-highlight" cx="52.8" cy="61" rx="1.2" ry="2" fill="#dfffe9" transform="rotate(34 52.8 61)" opacity="0.9" />
+            </g>
+            <g className="character-eye-pupil character-eye-pupil-right">
+              <ellipse cx="83" cy="58.6" rx="5.1" ry="6.2" fill="#0d3034" />
+              <ellipse className="character-eye-highlight" cx="80.2" cy="54.6" rx="2.5" ry="1.35" fill="#dfffe9" transform="rotate(-32 80.2 54.6)" />
+              <ellipse className="character-eye-highlight" cx="86.8" cy="61" rx="1.2" ry="2" fill="#dfffe9" transform="rotate(34 86.8 61)" opacity="0.9" />
+            </g>
           </g>
         </g>
-        {/* Eyes Closed */}
         <g className="eye-closed">
           <path
-            d="M 41 55 Q 48 60 55 55"
+            d="M 40 57 Q 48 62 56 57"
             fill="none"
             stroke="var(--ink)"
             strokeWidth="3"
             strokeLinecap="round"
           />
           <path
-            d="M 73 55 Q 80 60 87 55"
+            d="M 72 57 Q 80 62 88 57"
             fill="none"
             stroke="var(--ink)"
             strokeWidth="3"
             strokeLinecap="round"
           />
         </g>
-        {/* Mouths */}
         <path
           className="mouth-neutral"
+          data-testid="character-mouth-neutral-layer"
           d="M 60 68 Q 64 71 68 68"
           fill="none"
           stroke="var(--ink)"
@@ -166,7 +193,31 @@ const LobsterSvg: React.FC<LobsterSvgProps> = ({ pupilOffset }) => (
         <circle className="mouth-o" cx="64" cy="70" r="3.4" fill="var(--ink)" />
       </g>
     </g>
-    {/* Effects */}
+
+    <g className="character-left-hand-top-layer">
+      <image
+        data-testid="character-left-hand-layer"
+        className="character-layer"
+        href={leftHandUrl}
+        x="55"
+        y="70"
+        width="50"
+        height="50"
+      />
+    </g>
+
+    <g className="character-right-hand-top-layer">
+      <image
+        data-testid="character-right-hand-layer"
+        className="character-layer"
+        href={rightHandUrl}
+        x="20"
+        y="70"
+        width="50"
+        height="50"
+      />
+    </g>
+
     <g className="fx-zzz">
       <text x="85" y="40" fill="white" fontWeight="bold" fontSize="14">
         Z
@@ -177,6 +228,11 @@ const LobsterSvg: React.FC<LobsterSvgProps> = ({ pupilOffset }) => (
     </g>
     <g className="fx-sweat">
       <path d="M 35 35 Q 30 45 35 50 Q 40 45 35 35 Z" fill="#87CEFA" opacity="0.8" />
+    </g>
+    <g className="fx-alert">
+      <text x="88" y="32" fill="white" fontWeight="bold" fontSize="18">
+        !
+      </text>
     </g>
   </svg>
 );
@@ -191,6 +247,7 @@ export const Pet: React.FC = () => {
   const [showModeOverlay, setShowModeOverlay] = useState(false);
   const [cameraSnapActive, setCameraSnapActive] = useState(false);
   const [cameraFlashActive, setCameraFlashActive] = useState(false);
+  const [wakeWindowFlightActive, setWakeWindowFlightActive] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const isDraggingRef = useRef(false);
   const didDragRef = useRef(false);
@@ -198,6 +255,7 @@ export const Pet: React.FC = () => {
   const cameraSnapEndTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cameraFlashOnTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cameraFlashOffTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const wakeWindowFlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const sleepLockedRef = useRef(false);
 
   const setPetMood = useCallback((nextMood: Mood) => {
@@ -209,7 +267,12 @@ export const Pet: React.FC = () => {
         clearTimeout(idleBehaviorTimeoutRef.current);
         idleBehaviorTimeoutRef.current = null;
       }
+      if (wakeWindowFlightTimeoutRef.current) {
+        clearTimeout(wakeWindowFlightTimeoutRef.current);
+        wakeWindowFlightTimeoutRef.current = null;
+      }
       setIdleBehavior(null);
+      setWakeWindowFlightActive(false);
     }
     setMood(nextMood);
   }, []);
@@ -217,6 +280,37 @@ export const Pet: React.FC = () => {
   const canApplyMoodUpdate = useCallback((nextMood: Mood): boolean => {
     if (!sleepLockedRef.current) return true;
     return nextMood === 'sleeping' || nextMood === 'doze' || nextMood === 'startle' || nextMood === 'idle';
+  }, []);
+
+  const playIdleBehavior = useCallback((nextIdleBehavior: IdleBehavior) => {
+    if (idleBehaviorTimeoutRef.current) {
+      clearTimeout(idleBehaviorTimeoutRef.current);
+    }
+
+    setIdleBehavior(nextIdleBehavior);
+
+    idleBehaviorTimeoutRef.current = setTimeout(() => {
+      setIdleBehavior(null);
+      idleBehaviorTimeoutRef.current = null;
+    }, getIdleBehaviorDuration(nextIdleBehavior));
+  }, []);
+
+  const playWakeWindowFlight = useCallback(() => {
+    if (wakeWindowFlightTimeoutRef.current) {
+      clearTimeout(wakeWindowFlightTimeoutRef.current);
+    }
+
+    setWakeWindowFlightActive(true);
+    if (!shouldReduceMotion()) {
+      void window.clawster.playPetWakeFlight().catch((error) => {
+        console.warn('[Pet] Failed to play wake window flight:', error);
+      });
+    }
+
+    wakeWindowFlightTimeoutRef.current = setTimeout(() => {
+      setWakeWindowFlightActive(false);
+      wakeWindowFlightTimeoutRef.current = null;
+    }, WAKE_WINDOW_FLIGHT_DURATION_MS);
   }, []);
 
   // Cursor tracking for pupils
@@ -298,6 +392,7 @@ export const Pet: React.FC = () => {
         id: messageData.id || crypto.randomUUID(),
         text: messageData.text || messageData.content || '',
         quickReplies: messageData.quickReplies || DEFAULT_QUICK_REPLIES,
+        reflectionId: messageData.reflectionId,
       };
       window.clawster.showPetChat(message);
       if (!sleepLockedRef.current) {
@@ -396,32 +491,9 @@ export const Pet: React.FC = () => {
     window.clawster.onIdleBehavior((data) => {
       if (sleepLockedRef.current) return;
 
-      const idleData = data as { type: IdleBehavior; direction?: string };
-      // Clear any existing behavior timeout
-      if (idleBehaviorTimeoutRef.current) {
-        clearTimeout(idleBehaviorTimeoutRef.current);
-      }
-
-      // Set the idle behavior
-      setIdleBehavior(idleData.type);
-
-      // Duration varies by behavior type
-      const durations: Record<string, number> = {
-        blink: 400,
-        look_around: 2000,
-        snip_claws: 1500,
-        yawn: 2500,
-        stretch: 2000,
-        wiggle: 1200,
-        wander: 2500,
-      };
-
-      const duration = idleData.type ? durations[idleData.type] || 1500 : 1500;
-
-      // Clear the behavior after animation completes
-      idleBehaviorTimeoutRef.current = setTimeout(() => {
-        setIdleBehavior(null);
-      }, duration);
+      const idleData = data as { type?: string; direction?: string };
+      if (!isIdleBehavior(idleData.type)) return;
+      playIdleBehavior(idleData.type);
     });
 
     // Listen for tutorial events
@@ -450,13 +522,16 @@ export const Pet: React.FC = () => {
       if (cameraFlashOffTimeoutRef.current) {
         clearTimeout(cameraFlashOffTimeoutRef.current);
       }
+      if (wakeWindowFlightTimeoutRef.current) {
+        clearTimeout(wakeWindowFlightTimeoutRef.current);
+      }
       window.clawster.removeAllListeners();
     };
-  }, [canApplyMoodUpdate, setPetMood]);
+  }, [canApplyMoodUpdate, playIdleBehavior, setPetMood]);
 
   const isSleepTransparent = transparentWhenSleeping && (mood === 'sleeping' || mood === 'doze');
   const shouldShowModeOverlay = import.meta.env.DEV && showModeOverlay;
-  const currentMode = isWalking ? 'walking' : idleBehavior ? `idle:${idleBehavior}` : `mood:${mood}`;
+  const currentMode = wakeWindowFlightActive ? 'wake-window-flight' : isWalking ? 'walking' : idleBehavior ? `idle:${idleBehavior}` : `mood:${mood}`;
 
   // Handle dragging - use document-level events to track fast mouse movements
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -523,9 +598,9 @@ export const Pet: React.FC = () => {
       window.clawster.tutorialPetClicked();
     }
 
-    // When sleeping, ignore poke reactions. The click still notifies main
-    // so explicit user interaction can decide whether to wake Clawster.
     if (sleepLockedRef.current) {
+      setPetMood('idle');
+      playWakeWindowFlight();
       window.clawster.petClicked?.();
       return;
     }
@@ -551,7 +626,7 @@ export const Pet: React.FC = () => {
 
     // Notify main process (optional - for sound effects or other reactions)
     window.clawster.petClicked?.();
-  }, [setPetMood, tutorialActive]);
+  }, [playWakeWindowFlight, setPetMood, tutorialActive]);
 
   // Right click = open custom context menu
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -573,11 +648,12 @@ export const Pet: React.FC = () => {
         <div className="pet-mode-overlay">{currentMode}</div>
       )}
 
-      {/* Animated Lobster Pet */}
+      {/* Animated companion pet */}
       <div
-        className={`lobster-container ${moodToState(mood)} ${isWalking ? 'state-walking' : ''} ${idleBehavior ? `idle-${idleBehavior}` : ''} ${pupilOffset ? 'tracking-cursor' : ''} ${isSleepTransparent ? 'sleep-transparent' : ''} ${cameraSnapActive ? 'action-camera-snap' : ''}`}
+        data-testid="ayah-character-shell"
+        className={`lobster-container ${moodToState(mood)} ${isWalking ? 'state-walking' : ''} ${idleBehavior ? `idle-${idleBehavior}` : ''} ${pupilOffset ? 'tracking-cursor' : ''} ${isSleepTransparent ? 'sleep-transparent' : ''} ${cameraSnapActive ? 'action-camera-snap' : ''} ${wakeWindowFlightActive ? 'wake-window-flight' : ''}`}
       >
-        <LobsterSvg pupilOffset={pupilOffset} />
+        <CharacterSvg pupilOffset={pupilOffset} />
         <div className="camera-prop" aria-hidden="true">
           <span className="camera-shutter" />
           <span className="camera-lens" />

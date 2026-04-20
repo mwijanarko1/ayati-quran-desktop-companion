@@ -2,11 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Animations */
-@keyframes popupIn {
+/* Speech bubble */
+.pet-speech-bubble {
+  position: relative;
+  filter: drop-shadow(0 14px 28px rgba(0, 0, 0, 0.3));
+}
+
+.pet-speech-bubble-panel {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(103, 224, 163, 0.1), transparent 38%),
+    #0f0f0f;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+}
+
+.pet-speech-bubble-tail {
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  z-index: 0;
+  width: 18px;
+  height: 18px;
+  background: #0f0f0f;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  transform: translateX(-50%) rotate(45deg);
+  transform-origin: center;
+}
+
+@keyframes speechBubbleIn {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.95);
+    transform: translateY(8px) scale(0.96);
   }
   to {
     opacity: 1;
@@ -14,8 +44,15 @@
   }
 }
 
-.animate-popup-in {
-  animation: popupIn 0.25s ease-out;
+.animate-speech-bubble-in {
+  animation: speechBubbleIn 0.22s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-speech-bubble-in,
+  .loading-dot {
+    animation: none;
+  }
 }
 
 /* Thin dark scrollbar */
@@ -175,7 +212,7 @@
 }
 
 .message-link {
-  color: #FF8C69;
+  color: #67E0A3;
   text-decoration: underline;
   text-decoration-color: rgba(255, 140, 105, 0.4);
   cursor: pointer;

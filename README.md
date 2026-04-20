@@ -1,192 +1,79 @@
-# Clawster — AI Desktop Pet for macOS
+# Ayati - Quran Desktop Companion
 
-**Clawster is a free, open-source AI desktop pet powered by [OpenClaw](https://openclaw.ai).** It's a screen-aware AI companion for macOS — a cute animated lobster that lives on your desktop, watches what you're doing, and helps you get things done.
+Ayati - Quran Desktop Companion is an Electron desktop companion that turns a screenshot into a Quran-focused reflection. Press the capture shortcut, Ayati - Quran Desktop Companion sends the image to the configured AI provider account, ranks a relevant ayah, retrieves Quran Foundation content, and can save a Quran Foundation bookmark when the user is signed in.
 
-Clawster is the first AI pet and desktop pet built on OpenClaw. All AI processing runs locally on your machine. No cloud, no API keys, no data leaves your computer.
+## AI Provider
 
-**[Website](https://clawster.pet)** · **[Download for Mac (Apple Silicon)](https://github.com/wuyuwenj/clawster/releases/download/v0.1.3/Clawster-0.1.3-arm64.dmg)** · **[Download for Mac (Intel)](https://github.com/wuyuwenj/clawster/releases/download/v0.1.3/Clawster-0.1.3-x64.dmg)**
-
-![Clawster Demo](https://img.shields.io/badge/status-beta-orange) ![License](https://img.shields.io/badge/license-MIT-blue) ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
-
-https://github.com/wuyuwenj/clawster/raw/main/assets/demo.mp4
-
-## What is Clawster?
-
-Clawster is an AI desktop pet that sits on your macOS screen as an animated lobster. Unlike traditional virtual pets, this desktop pet is powered by OpenClaw and can actually help you — it watches your screen, answers questions, analyzes screenshots, and provides context-aware assistance for any app or website.
-
-**Key highlights:**
-- **AI desktop pet** that lives on your screen with 12 animated moods
-- **Screen-aware AI companion** — knows what app you're using
-- **Desktop pet powered by OpenClaw** — all AI runs locally, fully private
-- **Not just for developers** — helps with any app, website, or task
-- Won **2nd Place at the humans& hackathon**
-
-## Features
-
-| Feature | Description | Shortcut |
-|---------|-------------|----------|
-| **Quick Chat** | Summon Clawster anywhere for context-aware help | `Cmd+Shift+Space` |
-| **Screenshot Questions** | Snap any part of your screen and ask about it | `Cmd+Shift+/` |
-| **Full Assistant Panel** | Open the full assistant for longer conversations | `Cmd+Shift+A` or right-click pet |
-| **12 Animated Moods** | Expressive animations that react to interactions | — |
-| **Screen Awareness** | Detects your active app and window for contextual help | — |
-| **Customizable Personality** | Edit IDENTITY.md and SOUL.md to shape behavior | — |
-| **Attention Seeking** | Scuttles toward your cursor when feeling lonely | — |
-| **Guided Onboarding** | 8-step wizard, no terminal required | — |
-
-## Animations
-
-This AI desktop pet expresses itself through 12 animated moods:
-
-| Idle | Happy | Sleep | Startle |
-|:----:|:-----:|:-----:|:-------:|
-| <img src="assets/animations/idle.svg" width="80"> | <img src="assets/animations/happy.svg" width="80"> | <img src="assets/animations/sleep.svg" width="80"> | <img src="assets/animations/startle.svg" width="80"> |
-| Breathing & blinking | Bouncing with joy | Zzz... | Surprised! |
-
-| Doze | Side-Eye | Crossed | Huff |
-|:----:|:--------:|:-------:|:----:|
-| <img src="assets/animations/doze.svg" width="80"> | <img src="assets/animations/side-eye.svg" width="80"> | <img src="assets/animations/crossed.svg" width="80"> | <img src="assets/animations/huff.svg" width="80"> |
-| Getting sleepy... | Judging you | Arms crossed | Steaming mad |
-
-| Proud | Peek | Spin | Walking |
-|:-----:|:----:|:----:|:-------:|
-| <img src="assets/animations/proud.svg" width="80"> | <img src="assets/animations/peek.svg" width="80"> | <img src="assets/animations/spin.svg" width="80"> | <img src="assets/animations/walking.svg" width="80"> |
-| Feeling accomplished | Curious peek | Celebratory spin | Scuttling around |
-
-## Screenshots
-
-| Chat Popup | Quick Chat Bar | Assistant Panel |
-|:----------:|:--------------:|:---------------:|
-| ![Clawster AI desktop pet chat popup](assets/screenshots/chat-popup.png) | ![Clawster AI pet quick chat bar](assets/screenshots/quick-chat.png) | ![Clawster desktop pet assistant panel](assets/screenshots/assistant.png) |
-| Clawster pops up with contextual tips | Press `Cmd+Shift+Space` to chat anywhere | Right-click the pet for the full assistant |
-
-## Download
-
-**For most users:** Download the app directly — no terminal needed.
-
-- **[Download Clawster for Mac (Apple Silicon)](https://github.com/wuyuwenj/clawster/releases/download/v0.1.3/Clawster-0.1.3-arm64.dmg)**
-- **[Download Clawster for Mac (Intel)](https://github.com/wuyuwenj/clawster/releases/download/v0.1.3/Clawster-0.1.3-x64.dmg)**
-
-Open the DMG, drag Clawster to Applications, and launch. The 8-step onboarding wizard guides you through everything.
-
-> **Not sure which Mac you have?** Click  > About This Mac. If it says "Apple M1/M2/M3/M4" you have Apple Silicon. If it says "Intel" you have an Intel Mac.
-
-## Getting Started (from source)
-
-### Prerequisites
-
-- **Node.js** 18+
-- **[OpenClaw](https://openclaw.ai)** — local AI gateway running on your machine
-
-### Installation
+Ayati - Quran Desktop Companion uses the OpenRouter API by default:
 
 ```bash
-git clone https://github.com/wuyuwenj/clawster.git
-cd clawster
-npm install
-npm run dev
+OPENROUTER_API_KEY=your-openrouter-key
 ```
 
-On first launch, the onboarding wizard walks you through setup.
+The default endpoint is `https://openrouter.ai/api/v1`, and the bundled default model is `google/gemma-4-31b-it:free`.
 
-## Onboarding Wizard
+Settings also includes direct API account presets:
 
-Clawster includes a guided 8-step onboarding wizard — no terminal or command line required:
+| Provider | Base URL | Default model |
+| --- | --- | --- |
+| OpenAI | `https://api.openai.com/v1` | `gpt-5.2` |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3-flash-preview` |
+| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
+| Claude (Anthropic) | `https://api.anthropic.com/v1` | `claude-sonnet-4-20250514` |
+| Grok (xAI) | `https://api.x.ai/v1` | `grok-4.20-reasoning` |
+| Kimi (Moonshot AI) | `https://api.moonshot.ai/v1` | `kimi-k2.5` |
+| GLM (Z.AI) | `https://api.z.ai/api/paas/v4` | `glm-5.1` |
 
-1. **Welcome** — Introduction to Clawster and its capabilities
-2. **Workspace Selection** — Use your existing OpenClaw workspace or create a dedicated Clawster workspace
-3. **Memory Migration** — Optionally bring over conversations from an existing workspace
-4. **Connection Setup** — Auto-detects your OpenClaw gateway from `~/.openclaw/openclaw.json`
-5. **Personality** — Customize IDENTITY.md (who Clawster is) and SOUL.md (how it behaves)
-6. **Watch Preferences** — Configure screen awareness and privacy settings
-7. **Hotkeys** — Set custom keyboard shortcuts
-8. **Complete** — Review settings and launch
+OpenAI-compatible providers append `/chat/completions`; Claude appends `/messages` and uses Anthropic’s `x-api-key` plus `anthropic-version` headers.
 
-## How It Works
+## Quran Foundation API Usage
 
-Clawster is an AI desktop pet built on OpenClaw. Here's how the architecture works:
+Ayati - Quran Desktop Companion uses the required Quran Foundation API categories:
 
-1. Clawster sends your message to the local OpenClaw gateway (`http://127.0.0.1:18789`)
-2. OpenClaw processes the request using IDENTITY.md and SOUL.md to respond as Clawster
-3. Responses can include action commands (move, change mood, wave, snip)
-4. The desktop pet animates based on these actions
+- **Content API:** `GET {QURAN_API_BASE_URL}/content/api/v4/verses/by_key/{verseKey}` with `translations`, `fields=text_uthmani`, and `translation_fields=resource_name` to fetch Arabic text and translation.
+- **User API:** `POST {QURAN_API_BASE_URL}/auth/v1/bookmarks` to save an ayah bookmark with `key`, `verseNumber`, `type: "ayah"`, and `mushaf`.
+- **OAuth2/OIDC:** `GET {QURAN_AUTH_BASE_URL}/oauth2/auth` and `POST {QURAN_AUTH_BASE_URL}/oauth2/token` using PKCE authorization code flow for user sign-in and refresh.
 
-**Everything runs locally.** No API keys, no cloud accounts, no data leaves your machine. This AI pet is powered entirely by OpenClaw on your local machine.
+Configure local demo credentials in `.env.local`:
 
-## Customization
-
-### Personality
-Edit the files in your workspace to customize this AI desktop pet:
-- **IDENTITY.md** — Define who Clawster is: name, appearance, available actions
-- **SOUL.md** — Define how Clawster behaves: tone, response style, personality traits
-
-Make it a strict code reviewer, a cheerful assistant, a sarcastic debugger, or anything you want.
-
-### Behaviors
-In the Assistant panel settings, you can:
-- Enable/disable attention seeking behavior
-- Configure watched folders for file change notifications
-- Toggle window title tracking
-
-### Reset Onboarding
 ```bash
-rm ~/Library/Application\ Support/clawster/clawster-config.json
+QURAN_CLIENT_ID=your-quran-foundation-client-id
+QURAN_CLIENT_SECRET=your-quran-foundation-client-secret
+QURAN_REDIRECT_URI=ayati://oauth/callback
+QURAN_FOUNDATION_ENV=prelive
 ```
+
+For production, move token exchange to a backend proxy. Desktop apps cannot truly hide client secrets.
 
 ## Privacy
 
-Clawster is an AI desktop pet designed with privacy as a core principle:
-- All AI processing happens locally through OpenClaw
-- Screen captures are processed on-device and never uploaded
-- Conversations are stored locally in your workspace directory
-- No analytics, telemetry, or tracking
-- No cloud component
+Ayati - Quran Desktop Companion does not persist screenshot images by default. Screenshots are captured for analysis, cleared after the reflection is built, and local history stores only text summaries, ayah content, themes, timestamps, and sync state. Quran translations returned by Quran Foundation are displayed as returned and are not re-translated.
+
+## Demo Script
+
+1. Open Settings and choose an AI provider account.
+2. Sign in with Quran Foundation.
+3. Press `Cmd+Shift+/` or choose **Reflect on Screen**.
+4. Show the ayah card with Arabic text, translation, reference, reflection, and why it was selected.
+5. Save the bookmark and confirm synced or pending status.
+6. Open the **Reflections** tab to show local history and saved state.
+7. Clear the AI provider base URL or deny Screen Recording to show the low-confidence fallback path.
 
 ## Development
 
 ```bash
-npm run dev      # Run in development mode
-npm run build    # Build for production
-npm run dist     # Create distributable package
+bun install
+bun run test
+bun run build
 ```
 
-### Project Structure
+Runtime code lives under `src/`:
 
-```
-clawster/
-├── src/
-│   ├── main/           # Electron main process
-│   │   ├── main.ts     # App entry, windows, IPC handlers
-│   │   ├── clawbot-client.ts  # OpenClaw API client
-│   │   ├── watchers.ts # App/file activity watchers
-│   │   └── store.ts    # Persistent settings
-│   └── renderer/       # Frontend (React + Vite)
-│       ├── pet/        # Animated lobster component
-│       ├── chatbar/    # Quick chat overlay
-│       ├── assistant/  # Full assistant panel
-│       └── onboarding/ # First-launch setup wizard
-├── openclaw/           # Default personality files
-└── package.json
-```
-
-## System Requirements
-
-- **macOS** (Monterey 12.0 or later)
-- **Apple Silicon** (arm64) or **Intel** (x86_64)
-- **OpenClaw** installed locally
-
-## Links
-
-- **Website:** [clawster.pet](https://clawster.pet)
-- **OpenClaw:** [openclaw.ai](https://openclaw.ai)
-- **Download:** [Latest Release](https://github.com/wuyuwenj/clawster/releases/latest)
-
-## License
-
-MIT
-
----
-
-Clawster is a free, open-source AI desktop pet powered by OpenClaw for macOS. The first desktop pet built on OpenClaw.
-
-_Made with 🦞 and [OpenClaw](https://openclaw.ai)_
+- `src/main/main.ts` - Electron app bootstrap, windows, IPC, screenshot capture, and Ayati - Quran Desktop Companion orchestration.
+- `src/main/clawbot-client.ts` - AI provider client used for chat, streaming, and screenshot analysis.
+- `src/shared/ai-providers.ts` - provider catalog, default endpoints, default models, and protocol metadata.
+- `src/main/quran-foundation-client.ts` - Quran Foundation OAuth, content, and bookmark API client.
+- `src/main/ayah-*.ts` - ayah ranking, fallbacks, reflection history, and screen-scene analysis.
+- `src/renderer/assistant/` - assistant panel with chat, reflections, and settings.
+- `src/renderer/screenshot-question/` - floating screenshot reflection surface.
+- `src/renderer/onboarding/` - first-launch setup.

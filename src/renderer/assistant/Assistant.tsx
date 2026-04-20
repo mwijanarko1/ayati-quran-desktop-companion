@@ -5,6 +5,12 @@ import { MarkdownMessage } from '../components/MarkdownMessage';
 import { HotkeyInput } from '../components/HotkeyInput';
 import { GatewayConnectionBanner } from '../components/GatewayConnectionBanner';
 import { GatewaySetupModal } from '../components/GatewaySetupModal';
+import { AiProviderSettingsFields } from '../components/AiProviderSettingsFields';
+import {
+  DEFAULT_AI_PROVIDER,
+  getAiProviderConfig,
+  type ClawBotProvider,
+} from '../aiProviderDefaults';
 
 interface Message {
   id: string;
@@ -22,7 +28,7 @@ interface ActivityEvent {
   at: number;
 }
 
-type Tab = 'chat' | 'activity' | 'settings';
+type Tab = 'chat' | 'reflections' | 'activity' | 'settings';
 const isDevEnvironment = import.meta.env.DEV;
 const SCROLL_TO_BOTTOM_THRESHOLD = 140;
 
@@ -41,6 +47,11 @@ export const Assistant: React.FC = () => {
   const [showSetupModal, setShowSetupModal] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [ayahSettings, setAyahSettings] = useState<AyahLensSettings | null>(null);
+  const [quranAuthStatus, setQuranAuthStatus] = useState<QuranAuthStatus>({ isConnected: false, scopes: [] });
+  const [reflections, setReflections] = useState<AyahReflection[]>([]);
+  const [oauthCallbackUrl, setOauthCallbackUrl] = useState('');
+  const [quranStatusMessage, setQuranStatusMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const activeStreamRequestIdRef = useRef<string | null>(null);
@@ -100,6 +111,9 @@ export const Assistant: React.FC = () => {
     window.clawster.getSettings().then((s) => {
       setSettings(s as Record<string, unknown>);
     });
+    window.clawster.getAyahLensSettings().then(setAyahSettings);
+    window.clawster.getQuranAuthStatus().then(setQuranAuthStatus);
+    window.clawster.getAyahReflectionHistory().then(setReflections);
 
     window.clawster.getChatHistory().then((history) => {
       if (Array.isArray(history) && history.length > 0) {
@@ -116,6 +130,12 @@ export const Assistant: React.FC = () => {
 
     // Listen for connection status changes
     window.clawster.onConnectionStatusChange(setConnectionStatus);
+    window.clawster.onAyahOAuthCallback((callbackUrl) => {
+      window.clawster.completeQuranOAuthCallback(callbackUrl).then((status) => {
+        setQuranAuthStatus(status);
+        setQuranStatusMessage(status.error ?? 'Quran Foundation account connected.');
+      });
+    });
 
     window.clawster.onActivityEvent((event: unknown) => {
       const activityEvent = event as ActivityEvent;
@@ -412,6 +432,69 @@ export const Assistant: React.FC = () => {
     setSettings(newSettings as Record<string, unknown>);
   }, []);
 
+  const updateAyahSetting = useCallback(async (key: string, value: unknown) => {
+    const nextSettings = await window.clawster.updateAyahLensSetting(key, value);
+    setAyahSettings(nextSettings);
+  }, []);
+
+  const refreshReflections = useCallback(async () => {
+    setReflections(await window.clawster.getAyahReflectionHistory());
+  }, []);
+
+  const reflectOnScreen = useCallback(async () => {
+    const permissionStatus = await window.clawster.getScreenCapturePermission();
+    if (permissionStatus === 'denied' || permissionStatus === 'restricted') {
+      alert('Screen recording permission required. Please enable in System Settings > Privacy & Security > Screen Recording');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const nextReflection = await window.clawster.captureAyahReflection();
+      await refreshReflections();
+      switchTab('reflections');
+      setQuranStatusMessage(`New reflection: ${nextReflection.surahName} ${nextReflection.verseKey}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [refreshReflections, switchTab]);
+
+  const saveReflectionFromPanel = useCallback(async (reflectionId: string) => {
+    const savedReflection = await window.clawster.saveAyahReflection(reflectionId);
+    if (savedReflection) {
+      await refreshReflections();
+      setQuranStatusMessage(
+        savedReflection.syncState === 'synced'
+          ? 'Bookmark synced with Quran Foundation.'
+          : 'Reflection saved locally. Sign in to sync bookmarks.',
+      );
+    }
+  }, [refreshReflections]);
+
+  const startQuranSignIn = useCallback(async () => {
+    try {
+      const { authorizeUrl } = await window.clawster.startQuranOAuth();
+      window.clawster.openExternal(authorizeUrl);
+      setQuranStatusMessage('Complete sign-in in your browser, then paste the callback URL if the app does not finish automatically.');
+    } catch {
+      setQuranStatusMessage('Quran Foundation client ID is not configured.');
+    }
+  }, []);
+
+  const completeQuranSignIn = useCallback(async () => {
+    if (!oauthCallbackUrl.trim()) return;
+    const status = await window.clawster.completeQuranOAuthCallback(oauthCallbackUrl.trim());
+    setQuranAuthStatus(status);
+    setOauthCallbackUrl('');
+    setQuranStatusMessage(status.error ?? 'Quran Foundation account connected.');
+  }, [oauthCallbackUrl]);
+
+  const disconnectQuran = useCallback(async () => {
+    await window.clawster.disconnectQuranAccount();
+    setQuranAuthStatus(await window.clawster.getQuranAuthStatus());
+    setQuranStatusMessage('Quran Foundation account disconnected. Local reflections remain on this device.');
+  }, []);
+
   const closeWindow = useCallback(() => {
     window.clawster.closeAssistant();
   }, []);
@@ -429,32 +512,45 @@ export const Assistant: React.FC = () => {
     }
   };
 
-  // Clawster Icon (body, tail, eyes - no claws)
-  const ClawsterIcon = ({ size = 18 }: { size?: number }) => (
+  const AyatiIcon = ({ size = 18 }: { size?: number }) => (
     <svg viewBox="0 0 128 128" width={size} height={size}>
-      <path d="M 50 100 Q 64 125 78 100 Z" fill="#FF8C69" stroke="#8B3A3A" strokeWidth="4" />
-      <rect x="34" y="28" width="60" height="75" rx="30" fill="#FF8C69" stroke="#8B3A3A" strokeWidth="4" />
-      <circle cx="48" cy="55" r="7" fill="#1A1A1A" />
-      <circle cx="80" cy="55" r="7" fill="#1A1A1A" />
-      <circle cx="46" cy="53" r="2.5" fill="#FFF" />
-      <circle cx="78" cy="53" r="2.5" fill="#FFF" />
-      <path d="M 60 68 Q 64 71 68 68" fill="none" stroke="#1A1A1A" strokeWidth="2" strokeLinecap="round" />
+      <rect x="18" y="18" width="92" height="92" rx="24" fill="#0A1914" stroke="#67E0A3" strokeOpacity="0.35" strokeWidth="4" />
+      <path d="M39 64C48 44 80 44 89 64C80 84 48 84 39 64Z" fill="#67E0A3" fillOpacity="0.14" stroke="#67E0A3" strokeWidth="5" strokeLinejoin="round" />
+      <circle cx="64" cy="64" r="13" fill="#AFF9C9" fillOpacity="0.22" stroke="#AFF9C9" strokeWidth="4" />
+      <path d="M53 91H75" stroke="#7CF0BD" strokeWidth="5" strokeLinecap="round" />
     </svg>
   );
+
+  const clawbotSettings = settings.clawbot as {
+    url?: string;
+    token?: string;
+    provider?: ClawBotProvider;
+    model?: string;
+  } | undefined;
+  const aiProvider = clawbotSettings?.provider ?? DEFAULT_AI_PROVIDER;
+  const handleAiProviderChange = (nextProvider: ClawBotProvider) => {
+    const nextConfig = getAiProviderConfig(nextProvider);
+    updateSetting('clawbot.provider', nextProvider);
+    updateSetting('clawbot.url', nextConfig.baseUrl);
+    updateSetting('clawbot.model', nextConfig.defaultModel);
+    updateSetting('clawbot.token', '');
+  };
 
   return (
     <div className="flex flex-col h-screen bg-[#0f0f0f] text-neutral-200 overflow-hidden">
       {/* Header */}
       <div className="h-12 border-b border-white/5 flex items-center justify-between px-4 select-none shrink-0 bg-[#0f0f0f] drag-region">
         <div className="flex items-center gap-2.5">
-          <ClawsterIcon size={18} />
-          <span className="text-sm font-medium tracking-tight text-white">Clawster</span>
+          <AyatiIcon size={18} />
+          <span className="min-w-0 truncate text-sm font-medium tracking-tight text-white" title="Ayati - Quran Desktop Companion">
+            Ayati - Quran Desktop Companion
+          </span>
           <button
             className="no-drag relative flex items-center justify-center ml-1 cursor-pointer"
             onClick={() => !connectionStatus.connected && setShowSetupModal(true)}
             title={connectionStatus.connected ? 'Connected to gateway' : 'Gateway disconnected - Click for setup'}
           >
-            <div className={`w-2 h-2 rounded-full ${connectionStatus.connected ? 'bg-[#008080] status-pulse' : 'bg-red-400'}`}></div>
+            <div className={`w-2 h-2 rounded-full ${connectionStatus.connected ? 'bg-[#7CF0BD] status-pulse' : 'bg-red-400'}`}></div>
           </button>
         </div>
         <button
@@ -471,17 +567,27 @@ export const Assistant: React.FC = () => {
           onClick={() => switchTab('chat')}
           className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
             activeTab === 'chat'
-              ? 'text-[#FF8C69] border-[#FF8C69]'
+              ? 'text-[#67E0A3] border-[#67E0A3]'
               : 'text-neutral-500 border-transparent hover:text-neutral-300'
           }`}
         >
           Chat
         </button>
         <button
+          onClick={() => switchTab('reflections')}
+          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+            activeTab === 'reflections'
+              ? 'text-[#67E0A3] border-[#67E0A3]'
+              : 'text-neutral-500 border-transparent hover:text-neutral-300'
+          }`}
+        >
+          Reflections
+        </button>
+        <button
           onClick={() => switchTab('activity')}
           className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
             activeTab === 'activity'
-              ? 'text-[#FF8C69] border-[#FF8C69]'
+              ? 'text-[#67E0A3] border-[#67E0A3]'
               : 'text-neutral-500 border-transparent hover:text-neutral-300'
           }`}
         >
@@ -491,7 +597,7 @@ export const Assistant: React.FC = () => {
           onClick={() => switchTab('settings')}
           className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
             activeTab === 'settings'
-              ? 'text-[#FF8C69] border-[#FF8C69]'
+              ? 'text-[#67E0A3] border-[#67E0A3]'
               : 'text-neutral-500 border-transparent hover:text-neutral-300'
           }`}
         >
@@ -520,15 +626,15 @@ export const Assistant: React.FC = () => {
             >
               {messages.length === 0 && (
                 <div className="text-center text-neutral-500 py-10">
-                  <p className="mb-2">Press <kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded text-xs font-mono">⌥Space</kbd> to summon me anytime!</p>
-                  <p>Ask me anything or use the actions below.</p>
+                  <p className="mb-2">Capture your screen for a Quran-focused reflection.</p>
+                  <p>Use chat for connection help or open Reflections for recent ayahs.</p>
                 </div>
               )}
               {messages.map((msg) => (
                 <React.Fragment key={msg.id}>
                   {msg.role === 'assistant' && (
                     <div className="max-w-[85%] mr-auto">
-                      <div className="bg-[#FF8C69]/10 border border-[#FF8C69]/20 text-neutral-200 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm leading-relaxed">
+                      <div className="bg-[#67E0A3]/10 border border-[#67E0A3]/20 text-neutral-200 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm leading-relaxed">
                         <MarkdownMessage content={msg.content} />
                       </div>
                     </div>
@@ -551,10 +657,10 @@ export const Assistant: React.FC = () => {
               ))}
               {isLoading && !activeStreamMessageId && (
                 <div className="max-w-[85%] mr-auto">
-                  <div className="bg-[#FF8C69]/5 border border-[#FF8C69]/10 text-neutral-400 rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-[#FF8C69] typing-dot"></div>
-                    <div className="w-1.5 h-1.5 rounded-full bg-[#FF8C69] typing-dot"></div>
-                    <div className="w-1.5 h-1.5 rounded-full bg-[#FF8C69] typing-dot"></div>
+                  <div className="bg-[#67E0A3]/5 border border-[#67E0A3]/10 text-neutral-400 rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#67E0A3] typing-dot"></div>
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#67E0A3] typing-dot"></div>
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#67E0A3] typing-dot"></div>
                   </div>
                 </div>
               )}
@@ -574,12 +680,12 @@ export const Assistant: React.FC = () => {
           {/* Quick Actions */}
           <div className="px-4 pb-3 flex gap-2 overflow-x-auto scrollbar-hide shrink-0">
             <button
-              onClick={captureScreen}
+              onClick={reflectOnScreen}
               disabled={isLoading}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 bg-neutral-900 hover:bg-neutral-800 text-xs text-neutral-300 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Icon icon="solar:camera-linear" className="text-neutral-500" />
-              Look at screen
+              Reflect on Screen
             </button>
             <button
               onClick={() => setInput('What should I work on next?')}
@@ -606,18 +712,91 @@ export const Assistant: React.FC = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask Clawster anything..."
+              placeholder="Ask Ayati - Quran Desktop Companion anything..."
               disabled={isLoading}
-              className="flex-1 bg-neutral-900 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-neutral-200 outline-none focus:border-[#FF8C69] focus:ring-1 focus:ring-[#FF8C69]/30 transition-all resize-none min-h-[44px] max-h-[120px] scrollbar-hide disabled:opacity-50 cursor-text"
+              className="flex-1 bg-neutral-900 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all resize-none min-h-[44px] max-h-[120px] scrollbar-hide disabled:opacity-50 cursor-text"
             />
             <button
               onClick={sendMessage}
               disabled={isLoading || !input.trim()}
-              className="w-[44px] h-[44px] rounded-xl bg-white/10 text-neutral-400 flex items-center justify-center shrink-0 border border-white/5 transition-all hover:bg-[#FF8C69] hover:text-black hover:border-[#FF8C69] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white/10 disabled:hover:text-neutral-400 disabled:hover:border-white/5"
+              className="w-[44px] h-[44px] rounded-xl bg-white/10 text-neutral-400 flex items-center justify-center shrink-0 border border-white/5 transition-all hover:bg-[#67E0A3] hover:text-black hover:border-[#67E0A3] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white/10 disabled:hover:text-neutral-400 disabled:hover:border-white/5"
             >
               <Icon icon="solar:arrow-up-linear" className="text-lg" />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* CONTENT: Reflections */}
+      {activeTab === 'reflections' && (
+        <div className="flex-1 flex flex-col overflow-y-auto p-4 scrollbar-hide">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-sm font-semibold text-white">Recent Reflections</h2>
+              <p className="text-xs text-neutral-500 mt-1">Screenshots stay transient; only text summaries are saved.</p>
+            </div>
+            <button
+              onClick={reflectOnScreen}
+              disabled={isLoading}
+              className="px-3 py-2 bg-[#67E0A3] text-[#07120f] rounded-md text-xs font-semibold disabled:opacity-60"
+            >
+              Reflect on Screen
+            </button>
+          </div>
+
+          {quranStatusMessage && (
+            <div className="mb-3 text-xs text-[#67E0A3] bg-[#67E0A3]/10 border border-[#67E0A3]/25 rounded-md px-3 py-2">
+              {quranStatusMessage}
+            </div>
+          )}
+
+          {reflections.length === 0 ? (
+            <div className="text-center text-neutral-500 py-12 border border-white/10 rounded-md">
+              <p className="mb-2 text-neutral-300">No reflections yet.</p>
+              <p>Capture your screen to receive a Quran-focused reminder.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {reflections.map((reflection) => (
+                <article key={reflection.id} className="border-t border-white/10 pt-4">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <span className="text-xs font-semibold text-[#67E0A3]">
+                      {reflection.surahName} {reflection.verseKey}
+                    </span>
+                    <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                      {reflection.syncState}
+                    </span>
+                  </div>
+                  <p dir="rtl" lang="ar" translate="no" className="text-right text-2xl leading-loose text-white font-serif">
+                    {reflection.arabicText}
+                  </p>
+                  <p translate="no" className="text-sm leading-relaxed text-neutral-200 mt-2">
+                    {reflection.translation}
+                  </p>
+                  <p className="text-xs leading-relaxed text-neutral-500 mt-3">
+                    {reflection.whyThisVerse}
+                  </p>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => saveReflectionFromPanel(reflection.id)}
+                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
+                    >
+                      {reflection.savedAt ? 'Sync Bookmark' : 'Save Bookmark'}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await window.clawster.deleteAyahReflection(reflection.id);
+                        await refreshReflections();
+                      }}
+                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-500 hover:text-neutral-300"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -657,35 +836,151 @@ export const Assistant: React.FC = () => {
       {/* CONTENT: Settings */}
       {activeTab === 'settings' && (
         <div className="flex-1 flex flex-col overflow-y-auto p-5 space-y-6 scrollbar-hide">
-          {/* Group 1: ClawBot Server */}
+          {/* Group 1: AI Provider */}
           <div>
             <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              ClawBot Server
+              AI Provider
+            </h3>
+            <AiProviderSettingsFields
+              idPrefix="assistant-ai-provider"
+              provider={aiProvider}
+              baseUrl={clawbotSettings?.url || ''}
+              model={clawbotSettings?.model || ''}
+              apiKey={clawbotSettings?.token || ''}
+              onProviderChange={handleAiProviderChange}
+              onBaseUrlChange={(value) => updateSetting('clawbot.url', value)}
+              onModelChange={(value) => updateSetting('clawbot.model', value)}
+              onApiKeyChange={(value) => updateSetting('clawbot.token', value)}
+            />
+          </div>
+
+          <div className="pt-4 border-t border-white/5">
+            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
+              Quran Foundation
             </h3>
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-neutral-300 mb-1.5">
-                  Server URL
-                </label>
-                <input
-                  type="text"
-                  value={(settings.clawbot as { url: string; token: string })?.url || ''}
-                  onChange={(e) => updateSetting('clawbot.url', e.target.value)}
-                  className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#FF8C69] focus:ring-1 focus:ring-[#FF8C69]/30 transition-all font-mono"
-                />
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-neutral-300">
+                    {quranAuthStatus.isConnected ? 'Connected' : 'Not connected'}
+                  </p>
+                  <p className="text-[11px] text-neutral-500 mt-0.5">
+                    {quranAuthStatus.userName ?? 'Sign in to sync bookmarks with Quran Foundation.'}
+                  </p>
+                </div>
+                {quranAuthStatus.isConnected ? (
+                  <button
+                    onClick={disconnectQuran}
+                    className="px-3 py-2 bg-white/5 border border-white/10 rounded-md hover:bg-white/10 text-xs font-medium text-neutral-300"
+                  >
+                    Sign Out
+                  </button>
+                ) : (
+                  <button
+                    onClick={startQuranSignIn}
+                    className="px-3 py-2 bg-[#67E0A3] text-[#07120f] rounded-md text-xs font-semibold"
+                  >
+                    Sign In
+                  </button>
+                )}
               </div>
-              <div>
-                <label className="block text-xs font-medium text-neutral-300 mb-1.5">
-                  Gateway Token
+
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-neutral-300">
+                  Manual callback URL
                 </label>
-                <input
-                  type="password"
-                  value={(settings.clawbot as { url: string; token: string })?.token || ''}
-                  onChange={(e) => updateSetting('clawbot.token', e.target.value)}
-                  placeholder="Enter your API token"
-                  className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#FF8C69] focus:ring-1 focus:ring-[#FF8C69]/30 transition-all font-mono"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={oauthCallbackUrl}
+                    onChange={(event) => setOauthCallbackUrl(event.target.value)}
+                    placeholder="ayati://oauth/callback?code=..."
+                    className="min-w-0 flex-1 bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                  />
+                  <button
+                    onClick={completeQuranSignIn}
+                    className="px-3 py-2 bg-white/5 border border-white/10 rounded-md hover:bg-white/10 text-xs font-medium text-neutral-300"
+                  >
+                    Complete
+                  </button>
+                </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Translation ID</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={ayahSettings?.translationId ?? 20}
+                    onChange={(event) => updateAyahSetting('translationId', Number(event.target.value))}
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Mushaf ID</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={ayahSettings?.mushafId ?? 4}
+                    onChange={(event) => updateAyahSetting('mushafId', Number(event.target.value))}
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                  />
+                </label>
+              </div>
+
+              <div className="pt-3 border-t border-white/5 space-y-3">
+                <label className="flex items-center justify-between cursor-pointer group">
+                  <div className="flex flex-col pr-4">
+                    <span className="text-sm font-medium text-neutral-300">
+                      Contextual Quran Nudges
+                    </span>
+                    <span className="text-[11px] text-neutral-500 mt-0.5">
+                      Show Quran-linked reminders only when app context is clear
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={ayahSettings?.contextualNudges ?? true}
+                      onChange={(event) => updateAyahSetting('contextualNudges', event.target.checked)}
+                    />
+                    <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
+                    <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
+                  </div>
+                </label>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className="block text-xs font-medium text-neutral-300 mb-1.5">Cooldown Minutes</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={240}
+                      value={ayahSettings?.nudgeCooldownMinutes ?? 15}
+                      onChange={(event) => updateAyahSetting('nudgeCooldownMinutes', Number(event.target.value))}
+                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs font-medium text-neutral-300 mb-1.5">Max Per Day</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={48}
+                      value={ayahSettings?.maxNudgesPerDay ?? 8}
+                      onChange={(event) => updateAyahSetting('maxNudgesPerDay', Number(event.target.value))}
+                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <p className="text-[11px] leading-relaxed text-neutral-500">
+                Ayati - Quran Desktop Companion deletes screenshot data after analysis. Translation text from Quran Foundation is displayed as returned and is not re-translated.
+              </p>
+              {quranStatusMessage && <p className="text-[11px] text-[#67E0A3]">{quranStatusMessage}</p>}
             </div>
           </div>
 
@@ -706,7 +1001,7 @@ export const Assistant: React.FC = () => {
                     checked={(settings.watch as { activeApp: boolean })?.activeApp ?? true}
                     onChange={(e) => updateSetting('watch.activeApp', e.target.checked)}
                   />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#FF8C69] transition-colors border border-white/5"></div>
+                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
                   <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
                 </div>
               </label>
@@ -721,17 +1016,17 @@ export const Assistant: React.FC = () => {
                     checked={(settings.watch as { sendWindowTitles: boolean })?.sendWindowTitles ?? false}
                     onChange={(e) => updateSetting('watch.sendWindowTitles', e.target.checked)}
                   />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#FF8C69] transition-colors border border-white/5"></div>
+                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
                   <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
                 </div>
               </label>
             </div>
           </div>
 
-          {/* Group 3: Pet Behavior */}
+          {/* Group 3: Companion Behavior */}
           <div className="pt-4 border-t border-white/5">
             <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              Pet Behavior
+              Companion Behavior
             </h3>
             <div className="space-y-4">
               <label className="flex items-center justify-between cursor-pointer group">
@@ -750,7 +1045,7 @@ export const Assistant: React.FC = () => {
                     checked={(settings.pet as { attentionSeeker: boolean })?.attentionSeeker ?? true}
                     onChange={(e) => updateSetting('pet.attentionSeeker', e.target.checked)}
                   />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#FF8C69] transition-colors border border-white/5"></div>
+                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
                   <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
                 </div>
               </label>
@@ -760,7 +1055,7 @@ export const Assistant: React.FC = () => {
                     Transparent while asleep
                   </span>
                   <span className="text-[11px] text-neutral-500 mt-0.5">
-                    Fade Clawster when in doze/sleep state
+                    Fade Ayati - Quran Desktop Companion when in doze/sleep state
                   </span>
                 </div>
                 <div className="relative shrink-0">
@@ -770,7 +1065,7 @@ export const Assistant: React.FC = () => {
                     checked={(settings.pet as { transparentWhenSleeping?: boolean })?.transparentWhenSleeping ?? false}
                     onChange={(e) => updateSetting('pet.transparentWhenSleeping', e.target.checked)}
                   />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#FF8C69] transition-colors border border-white/5"></div>
+                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
                   <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
                 </div>
               </label>
@@ -790,8 +1085,8 @@ export const Assistant: React.FC = () => {
                 onChange={(value) => updateSetting('hotkeys.openChat', value)}
               />
               <HotkeyInput
-                label="Capture Screen"
-                description="Take a screenshot and ask about it"
+                label="Reflect on Screen"
+                description="Capture your screen and receive a fitting ayah"
                 value={(settings.hotkeys as { captureScreen?: string })?.captureScreen || 'CommandOrControl+Shift+/'}
                 onChange={(value) => updateSetting('hotkeys.captureScreen', value)}
               />
@@ -827,7 +1122,7 @@ export const Assistant: React.FC = () => {
                       checked={(settings.dev as { windowBorders?: boolean })?.windowBorders ?? false}
                       onChange={(e) => updateSetting('dev.windowBorders', e.target.checked)}
                     />
-                    <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#FF8C69] transition-colors border border-white/5"></div>
+                    <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
                     <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
                   </div>
                 </label>
@@ -836,10 +1131,10 @@ export const Assistant: React.FC = () => {
                 <label className="flex items-center justify-between cursor-pointer group px-1">
                   <div className="flex flex-col">
                     <span className="text-sm font-medium text-neutral-300">
-                      Show pet mode overlay
+                      Show companion mode overlay
                     </span>
                     <span className="text-[11px] text-neutral-500 mt-0.5">
-                      Display current mode text above Clawster
+                      Display current mode text above Ayati - Quran Desktop Companion
                     </span>
                   </div>
                   <div className="relative shrink-0">
@@ -849,7 +1144,7 @@ export const Assistant: React.FC = () => {
                       checked={(settings.dev as { showPetModeOverlay?: boolean })?.showPetModeOverlay ?? false}
                       onChange={(e) => updateSetting('dev.showPetModeOverlay', e.target.checked)}
                     />
-                    <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#FF8C69] transition-colors border border-white/5"></div>
+                    <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
                     <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
                   </div>
                 </label>
@@ -858,10 +1153,10 @@ export const Assistant: React.FC = () => {
                 <div className="space-y-2">
                   <div className="px-1">
                     <span className="text-sm font-medium text-neutral-300">
-                      Force Emotion
+                      Force companion state
                     </span>
                     <p className="text-[11px] text-neutral-500 mt-0.5">
-                      Instantly set Clawster's current mood state
+                      Instantly set Ayati - Quran Desktop Companion's current mood state
                     </p>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
@@ -915,7 +1210,7 @@ export const Assistant: React.FC = () => {
                 >
                   <div className="flex items-center gap-2">
                     <Icon icon="solar:sleeping-linear" className="text-neutral-400 group-hover:text-neutral-300" />
-                    <span className="text-sm font-medium text-neutral-300">Set Clawster to Sleep</span>
+                    <span className="text-sm font-medium text-neutral-300">Set Ayati - Quran Desktop Companion to Sleep</span>
                   </div>
                   <span className="text-[10px] text-neutral-500">Dev action</span>
                 </button>

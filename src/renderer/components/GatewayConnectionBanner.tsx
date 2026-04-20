@@ -30,10 +30,6 @@ export function GatewayConnectionBanner({
     }
   }, [connected, wasDisconnected]);
 
-  const handleCopyCommand = async () => {
-    await window.clawster.copyToClipboard('openclaw gateway install');
-  };
-
   // Show restored message briefly
   if (showRestoredMessage) {
     return (
@@ -46,7 +42,6 @@ export function GatewayConnectionBanner({
     );
   }
 
-  // Don't show anything if connected
   if (connected) {
     return null;
   }
@@ -60,7 +55,7 @@ export function GatewayConnectionBanner({
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-amber-400">Gateway Not Connected</p>
           <p className="text-xs text-neutral-400 mt-0.5">
-            The OpenClaw gateway isn't running. Start it to enable AI features.
+            The AI provider is not connected. Check the ready-to-use provider defaults, then try again.
           </p>
           {error && (
             <p className="text-xs text-neutral-500 mt-1 truncate" title={error}>
@@ -69,19 +64,10 @@ export function GatewayConnectionBanner({
           )}
           <div className="flex gap-2 mt-2">
             <button
-              onClick={handleCopyCommand}
-              className="px-2.5 py-1 text-xs bg-[#FF8C69]/20 hover:bg-[#FF8C69]/30 text-[#FF8C69] rounded-lg transition-colors flex items-center gap-1"
-            >
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-              Copy Command
-            </button>
-            <button
               onClick={onShowSetupGuide}
               className="px-2.5 py-1 text-xs bg-white/5 hover:bg-white/10 text-neutral-300 rounded-lg transition-colors"
             >
-              Setup Guide
+              Connection Settings
             </button>
           </div>
         </div>

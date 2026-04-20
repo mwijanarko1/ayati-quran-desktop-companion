@@ -24,7 +24,7 @@ function formatHotkey(hotkey: string): string {
 }
 
 const TUTORIAL_STEPS: TutorialStepConfig[] = [
-  { step: 1, copy: "Hi there! I'm Clawster, your desktop companion!", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 2500 },
+  { step: 1, copy: "Hi there! I'm Ayati - Quran Desktop Companion, your Quran reflection companion!", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 2500 },
   { step: 2, copy: "Try clicking on me to see how I react!", fallbackDelay: 3000, delayBefore: 500 },
   { step: 3, copy: "Fun right? I have lots of different reactions!", fallbackDelay: 0, autoAdvance: true, autoAdvanceDelay: 2500, delayBefore: 500 },
   { step: 4, copy: "Now move your mouse away from me...", fallbackDelay: 6000, delayBefore: 500 },
@@ -518,8 +518,7 @@ export class TutorialManager {
    * Perform final animation for step 10
    */
   private performFinalAnimation(): void {
-    // Send wave mood to pet
-    this.petWindow?.webContents.send('clawbot-mood', { state: 'happy' });
+    this.petWindow?.webContents.send('idle-behavior', { type: 'wave' });
   }
 
   /**

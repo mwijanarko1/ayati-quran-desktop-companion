@@ -1,4 +1,4 @@
-# Clawster Project Instructions
+# Ayati - Quran Desktop Companion Project Instructions
 
 ## Git Workflow
 
@@ -30,7 +30,7 @@ mv /path/to/current-folder /path/to/new-branch-name
 
 ## Linear Issue Workflow
 
-When creating Linear issues for Clawster:
+When creating Linear issues for Ayati - Quran Desktop Companion:
 
 1. Ask for priority (Urgent/High/Normal/Low)
 2. Add the appropriate label:
@@ -38,8 +38,8 @@ When creating Linear issues for Clawster:
    - **Feature** - New features
    - **Improvement** - Enhancements to existing features
    - **idea** - Future ideas to explore
-3. Add the issue to the **Clawster Roadmap** project
-4. Update the Clawster Roadmap description to include the new issue in the appropriate priority section:
+3. Add the issue to the **Ayati - Quran Desktop Companion Roadmap** project
+4. Update the Ayati - Quran Desktop Companion Roadmap description to include the new issue in the appropriate priority section:
    - Urgent Priority
    - High Priority
    - Medium Priority (for Normal)
@@ -56,34 +56,34 @@ APPLE_TEAM_ID=39428U49B4
 ```
 
 ### Build Commands
-- **Build for macOS:** `npm run dist:mac`
-- **Build and deploy to landing page:** `npm run dist:mac:deploy`
+- **Build for macOS:** `bun run dist:mac`
+- **Build and deploy to landing page:** `bun run dist:mac:deploy`
 
 ### Updating Version for Release
 1. Update version in `package.json`: `"version": "0.1.x"`
-2. Run `npm run dist:mac` to build and notarize
+2. Run `bun run dist:mac` to build and notarize
 3. Release files are output to `/release/` folder
 
 ### Checking Notarization Status
 ```bash
 # Check if DMG is notarized
-xcrun stapler validate /path/to/Clawster-x.x.x-arm64.dmg
+xcrun stapler validate "/path/to/Ayati - Quran Desktop Companion-x.x.x-arm64.dmg"
 
 # Check if app is notarized
-spctl -a -vvv -t install /path/to/Clawster.app
+spctl -a -vvv -t install "/path/to/Ayati - Quran Desktop Companion.app"
 ```
 
 ### Manual Notarization (if build skipped it)
 ```bash
 # Submit for notarization
-xcrun notarytool submit /path/to/Clawster.dmg \
+xcrun notarytool submit "/path/to/Ayati - Quran Desktop Companion.dmg" \
   --apple-id "$APPLE_ID" \
   --password "$APPLE_APP_SPECIFIC_PASSWORD" \
   --team-id "39428U49B4" \
   --wait
 
 # Staple the ticket after approval
-xcrun stapler staple /path/to/Clawster.dmg
+xcrun stapler staple "/path/to/Ayati - Quran Desktop Companion.dmg"
 ```
 
 ### Troubleshooting

@@ -1,5 +1,16 @@
 // Shared types between main and renderer processes
 
+type ClawBotProvider =
+  | 'openrouter'
+  | 'openai'
+  | 'gemini'
+  | 'deepseek'
+  | 'anthropic'
+  | 'xai'
+  | 'moonshot'
+  | 'zai'
+  | 'openai-compatible';
+
 export interface ActivityEvent {
   type: 'app_focus_changed' | 'file_added' | 'file_changed' | 'file_deleted';
   app?: string;
@@ -21,6 +32,9 @@ export interface ClawBotResponse {
 export interface StoreSchema {
   clawbot: {
     url: string;
+    token?: string;
+    provider?: ClawBotProvider;
+    model?: string;
   };
   watch: {
     activeApp: boolean;

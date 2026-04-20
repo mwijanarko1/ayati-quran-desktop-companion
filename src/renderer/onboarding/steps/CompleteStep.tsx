@@ -1,4 +1,5 @@
 import type { OnboardingData } from '../Onboarding';
+import appIconUrl from '../../../../assets/icon.png';
 
 interface Props {
   data: OnboardingData;
@@ -9,145 +10,63 @@ interface Props {
   onComplete: () => void;
 }
 
-const HappyLobsterSvg = () => (
-  <svg width="120" height="120" viewBox="0 0 128 128">
-    {/* Tail */}
-    <path
-      d="M 50 100 Q 64 125 78 100 Z"
-      fill="#FF8C69"
-      stroke="#C44536"
-      strokeWidth="4"
-      strokeLinejoin="round"
-    />
-    {/* Left Claw - raised up for celebration */}
-    <g style={{ transform: 'rotate(-15deg)', transformOrigin: '40px 55px' }}>
-      <path
-        d="M 40 55 A 24 24 0 1 1 10 85 Q 20 80 25 75 Q 20 65 30 70 Z"
-        fill="#FF8C69"
-        stroke="#C44536"
-        strokeWidth="4"
-        strokeLinejoin="round"
-      />
-    </g>
-    {/* Right Claw - raised up for celebration */}
-    <g style={{ transform: 'rotate(15deg)', transformOrigin: '88px 55px' }}>
-      <path
-        d="M 88 55 A 24 24 0 1 0 118 85 Q 108 80 103 75 Q 108 65 98 70 Z"
-        fill="#FF8C69"
-        stroke="#C44536"
-        strokeWidth="4"
-        strokeLinejoin="round"
-      />
-    </g>
-    {/* Body */}
-    <g>
-      <rect
-        x="34"
-        y="28"
-        width="60"
-        height="75"
-        rx="30"
-        fill="#FF8C69"
-        stroke="#C44536"
-        strokeWidth="4"
-      />
-      {/* Belt/Band */}
-      <path
-        d="M 34 82 Q 64 92 94 82 L 94 88 Q 64 98 34 88 Z"
-        fill="#008080"
-        stroke="#006666"
-        strokeWidth="2"
-      />
-      {/* Belt buckle */}
-      <path
-        d="M 75 85 L 88 108 L 68 102 Z"
-        fill="#008080"
-        stroke="#006666"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      {/* Happy Eyes - closed/squinting */}
-      <path
-        d="M 41 53 Q 48 48 55 53"
-        fill="none"
-        stroke="#1a1a1a"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-      <path
-        d="M 73 53 Q 80 48 87 53"
-        fill="none"
-        stroke="#1a1a1a"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-      {/* Big Happy Smile */}
-      <path
-        d="M 54 65 Q 64 76 74 65"
-        fill="none"
-        stroke="#1a1a1a"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-      />
-    </g>
-  </svg>
-);
-
 export const CompleteStep: React.FC<Props> = ({ data, updateData }) => {
-  const getWorkspacePath = () => {
-    return data.workspaceType === 'openclaw'
-      ? '~/.openclaw/workspace/'
-      : '~/.openclaw/workspace-clawster/';
-  };
-
   return (
     <div className="h-full px-10 flex flex-col items-center justify-center text-center">
-      <div className="mb-8 animate-happy-bounce relative">
-        <HappyLobsterSvg />
-        <div className="absolute -inset-8 bg-[#FF8C69]/20 blur-2xl -z-10 rounded-full" />
+      <div className="mb-7 animate-happy-bounce relative">
+        <img
+          src={appIconUrl}
+          alt="Ayati - Quran Desktop Companion"
+          width={128}
+          height={128}
+          className="h-32 w-32 rounded-[28px] object-cover shadow-[0_18px_48px_rgba(103,224,163,0.18)]"
+        />
       </div>
 
-      <h2 className="text-3xl font-medium tracking-tight text-white mb-2">Clawster is Ready!</h2>
-      <p className="text-sm text-neutral-400 mb-8">Everything is configured and ready to go.</p>
+      <p className="brand-display text-xs font-semibold text-[#0f3328] mb-3">Ready for reflection</p>
+      <h2 className="text-3xl font-semibold tracking-tight text-[#07120f] mb-3">Ayati - Quran Desktop Companion is ready</h2>
+      <p className="text-sm text-[#2b4b40] mb-7 max-w-md">
+        Capture your screen, receive a Quran-centered reminder, and save reflections locally or with Quran Foundation.
+      </p>
 
-      {/* Summary */}
-      <div className="w-full bg-neutral-900/50 border border-white/5 rounded-xl p-4 text-left mb-8">
-        <ul className="space-y-2 text-xs text-neutral-300">
+      <div className="w-full bg-[#7CF0BD]/70 border border-[#07120f]/15 rounded-lg p-4 text-left mb-7">
+        <ul className="space-y-2 text-xs text-[#12362b]">
           <li className="flex items-center gap-2">
-            <iconify-icon icon="solar:check-circle-linear" className="text-[#008080]"></iconify-icon>
-            Workspace: <span className="font-mono text-neutral-500">{getWorkspacePath()}</span>
+            <iconify-icon icon="solar:check-circle-linear" className="text-[#07120f]"></iconify-icon>
+            Vision provider: {data.gatewayUrl.replace('http://', '').replace('https://', '')}
+            {data.gatewayModel.trim().length > 0 ? ` with ${data.gatewayModel}` : ''}
           </li>
           <li className="flex items-center gap-2">
-            <iconify-icon icon="solar:check-circle-linear" className="text-[#008080]"></iconify-icon>
-            Connected to {data.gatewayUrl.replace('http://', '').replace('https://', '')}
+            <iconify-icon icon="solar:check-circle-linear" className="text-[#07120f]"></iconify-icon>
+            Quran Foundation: pre-production OAuth configured
           </li>
           {data.watchActiveApp && (
             <li className="flex items-center gap-2">
-              <iconify-icon icon="solar:check-circle-linear" className="text-[#008080]"></iconify-icon>
-              Watching Active App
+              <iconify-icon icon="solar:check-circle-linear" className="text-[#07120f]"></iconify-icon>
+              Watching active app
             </li>
           )}
           {data.watchFolders.length > 0 && (
             <li className="flex items-center gap-2">
-              <iconify-icon icon="solar:check-circle-linear" className="text-[#008080]"></iconify-icon>
+              <iconify-icon icon="solar:check-circle-linear" className="text-[#07120f]"></iconify-icon>
               Watching {data.watchFolders.length} folder{data.watchFolders.length > 1 ? 's' : ''}
             </li>
           )}
         </ul>
       </div>
 
-      <label className="w-full max-w-sm mb-6 flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-neutral-900/30 px-3 py-2.5 cursor-pointer">
-        <span className="text-sm text-neutral-200">Launch on startup</span>
+      <label className="w-full max-w-sm mb-6 flex items-center justify-between gap-3 rounded-lg border border-[#07120f]/15 bg-[#7CF0BD]/70 px-3 py-2.5 cursor-pointer">
+        <span className="text-sm text-[#12362b]">Launch on startup</span>
         <input
           type="checkbox"
           checked={data.launchOnStartup}
           onChange={(e) => updateData({ launchOnStartup: e.target.checked })}
-          className="h-4 w-4 rounded border-white/20 bg-neutral-900 accent-[#FF8C69]"
+          className="h-4 w-4 rounded border-[#07120f]/20 bg-[#AFF9C9] accent-[#07120f]"
         />
       </label>
 
-      <div className="text-xs text-neutral-500">
-        Press <span className="bg-white/10 px-1.5 py-0.5 rounded text-neutral-300">Cmd+Shift+Space</span> to open chat anytime.
+      <div className="text-xs text-[#4f7064]">
+        Press <span className="bg-[#7CF0BD]/80 px-1.5 py-0.5 rounded text-[#07120f]">Cmd+Shift+/</span> to reflect on your screen.
       </div>
     </div>
   );

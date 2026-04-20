@@ -161,17 +161,13 @@ export const ChatBar: React.FC = () => {
     inputRef.current?.focus();
   };
 
-  const handleCopyCommand = async () => {
-    await window.clawster.copyToClipboard('openclaw gateway install');
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
     // Check connection status before submitting
     if (!isConnected) {
-      setResponse('Gateway not connected. Run `openclaw gateway install` in your terminal to start the gateway.');
+      setResponse('Gateway not connected. Update your AI provider settings, then check the connection again.');
       return;
     }
 
@@ -287,16 +283,12 @@ export const ChatBar: React.FC = () => {
     window.clawster.setChatbarIgnoreMouse(true);
   };
 
-  // Clawster Icon (body, tail, eyes - no claws)
-  const ClawsterIcon = ({ size = 24 }: { size?: number }) => (
+  const AyatiIcon = ({ size = 24 }: { size?: number }) => (
     <svg viewBox="0 0 128 128" width={size} height={size}>
-      <path d="M 50 100 Q 64 125 78 100 Z" fill="#FF8C69" stroke="#8B3A3A" strokeWidth="4" />
-      <rect x="34" y="28" width="60" height="75" rx="30" fill="#FF8C69" stroke="#8B3A3A" strokeWidth="4" />
-      <circle cx="48" cy="55" r="7" fill="#1A1A1A" />
-      <circle cx="80" cy="55" r="7" fill="#1A1A1A" />
-      <circle cx="46" cy="53" r="2.5" fill="#FFF" />
-      <circle cx="78" cy="53" r="2.5" fill="#FFF" />
-      <path d="M 60 68 Q 64 71 68 68" fill="none" stroke="#1A1A1A" strokeWidth="2" strokeLinecap="round" />
+      <rect x="18" y="18" width="92" height="92" rx="24" fill="#0A1914" stroke="#67E0A3" strokeOpacity="0.35" strokeWidth="4" />
+      <path d="M39 64C48 44 80 44 89 64C80 84 48 84 39 64Z" fill="#67E0A3" fillOpacity="0.14" stroke="#67E0A3" strokeWidth="5" strokeLinejoin="round" />
+      <circle cx="64" cy="64" r="13" fill="#AFF9C9" fillOpacity="0.22" stroke="#AFF9C9" strokeWidth="4" />
+      <path d="M53 91H75" stroke="#7CF0BD" strokeWidth="5" strokeLinecap="round" />
     </svg>
   );
 
@@ -307,18 +299,17 @@ export const ChatBar: React.FC = () => {
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
-        <div className="bg-[#0f0f0f] border border-white/10 rounded-2xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.05)] flex flex-col overflow-hidden backdrop-blur-xl">
+        <div className="bg-[#07120f] border border-[#67E0A3]/18 rounded-xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.55),0_0_0_1px_rgba(103,224,163,0.1)] flex flex-col overflow-hidden backdrop-blur-xl">
 
           {/* Input Area */}
           <form onSubmit={handleSubmit} className="flex items-center gap-3 p-3">
-            {/* Abstract Clawster Icon */}
-            <div className="w-10 h-10 rounded-xl bg-[#FF8C69]/10 flex items-center justify-center border border-[#FF8C69]/20 shrink-0">
-              <ClawsterIcon size={24} />
+            <div className="w-10 h-10 rounded-lg bg-[#67E0A3]/10 flex items-center justify-center border border-[#67E0A3]/20 shrink-0">
+              <AyatiIcon size={24} />
             </div>
 
             {/* Screenshot Thumbnail Pill */}
             {screenshot && (
-              <div className="flex items-center gap-1.5 bg-[#008080]/10 border border-[#008080]/20 p-1 rounded-lg shrink-0 group transition-colors hover:bg-[#008080]/20 animate-fade-in">
+              <div className="flex items-center gap-1.5 bg-[#67E0A3]/10 border border-[#67E0A3]/20 p-1 rounded-lg shrink-0 group transition-colors hover:bg-[#67E0A3]/15 animate-fade-in">
                 <div className="w-10 h-8 bg-[#0a0a0a] rounded overflow-hidden border border-white/10 flex-shrink-0">
                   <img
                     src={screenshot.image}
@@ -329,7 +320,7 @@ export const ChatBar: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleClearScreenshot}
-                  className="text-[#008080]/60 hover:text-[#008080] transition-colors"
+                  className="text-[#AFF9C9]/70 hover:text-[#AFF9C9] transition-colors"
                   title="Remove screenshot"
                 >
                   <Icon icon="solar:close-circle-linear" className="text-sm" />
@@ -346,7 +337,7 @@ export const ChatBar: React.FC = () => {
               title="Capture screenshot"
             >
               {isCapturing ? (
-                <div className="w-4 h-4 border-2 border-[#FF8C69] border-t-transparent rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-[#67E0A3] border-t-transparent rounded-full animate-spin" />
               ) : (
                 <Icon icon="solar:camera-linear" className="text-lg" />
               )}
@@ -358,14 +349,14 @@ export const ChatBar: React.FC = () => {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={screenshot ? "Ask about this screenshot..." : "Ask Clawster anything..."}
+              placeholder={screenshot ? "Ask about this screenshot..." : "Ask Ayati - Quran Desktop Companion anything..."}
               disabled={isLoading}
               className="flex-1 bg-transparent text-base text-white placeholder-neutral-500 outline-none font-medium h-full min-w-0 disabled:opacity-50"
             />
 
             {/* Loading indicator */}
             {isLoading && (
-              <div className="w-4 h-4 border-2 border-[#FF8C69] border-t-transparent rounded-full animate-spin shrink-0" />
+              <div className="w-4 h-4 border-2 border-[#67E0A3] border-t-transparent rounded-full animate-spin shrink-0" />
             )}
 
             {/* Esc hint */}
@@ -377,22 +368,13 @@ export const ChatBar: React.FC = () => {
           {/* Response Area */}
           {response && (
             <div className={`border-t border-white/5 p-4 flex gap-4 items-start animate-fade-in max-h-[200px] overflow-y-auto ${!isConnected ? 'bg-amber-500/5' : 'bg-[#0a0a0a]/50'}`}>
-              <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 mt-0.5 ${!isConnected ? 'bg-amber-500/20' : 'bg-[#FF8C69]/20'}`}>
-                <Icon icon={!isConnected ? "solar:danger-triangle-linear" : "solar:magic-stick-3-linear"} className={`text-xs ${!isConnected ? 'text-amber-400' : 'text-[#FF8C69]'}`} />
+              <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 mt-0.5 ${!isConnected ? 'bg-amber-500/20' : 'bg-[#67E0A3]/15'}`}>
+                <Icon icon={!isConnected ? "solar:danger-triangle-linear" : "solar:magic-stick-3-linear"} className={`text-xs ${!isConnected ? 'text-amber-400' : 'text-[#67E0A3]'}`} />
               </div>
               <div className="flex-1">
                 <div className="text-sm text-neutral-300 leading-relaxed select-text cursor-text">
                   <MarkdownMessage content={response} />
                 </div>
-                {!isConnected && (
-                  <button
-                    onClick={handleCopyCommand}
-                    className="mt-2 px-2.5 py-1 text-xs bg-[#FF8C69]/20 hover:bg-[#FF8C69]/30 text-[#FF8C69] rounded-lg transition-colors flex items-center gap-1"
-                  >
-                    <Icon icon="solar:copy-linear" className="text-xs" />
-                    Copy Command
-                  </button>
-                )}
               </div>
             </div>
           )}

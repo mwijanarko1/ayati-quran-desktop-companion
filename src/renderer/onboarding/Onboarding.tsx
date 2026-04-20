@@ -1,52 +1,46 @@
 import { useState, useCallback, useEffect } from 'react';
 import { WelcomeStep } from './steps/WelcomeStep';
-import { WorkspaceStep } from './steps/WorkspaceStep';
-import { MemoryStep } from './steps/MemoryStep';
-import { ConnectionStep } from './steps/ConnectionStep';
-import { PersonalityStep } from './steps/PersonalityStep';
+import { ApiKeysStep } from './steps/ApiKeysStep';
 import { WatchStep } from './steps/WatchStep';
 import { HotkeysStep } from './steps/HotkeysStep';
 import { CompleteStep } from './steps/CompleteStep';
+import { DEFAULT_AI_PROVIDER, DEFAULT_OPENROUTER_BASE_URL, DEFAULT_OPENROUTER_MODEL, type ClawBotProvider } from '../aiProviderDefaults';
 
-export type WorkspaceType = 'openclaw' | 'clawster';
+export type WorkspaceType = 'clawster';
 
 export interface OnboardingData {
-  workspaceType: WorkspaceType | null;
-  migrateMemory: boolean;
+  workspaceType: WorkspaceType;
   launchOnStartup: boolean;
+  aiProvider: ClawBotProvider;
   gatewayUrl: string;
   gatewayToken: string;
-  identity: string;
-  soul: string;
+  gatewayModel: string;
   watchFolders: string[];
   watchActiveApp: boolean;
   watchWindowTitles: boolean;
-  connectionTested: boolean;
   hotkeyOpenChat: string;
   hotkeyCaptureScreen: string;
   hotkeyOpenAssistant: string;
 }
 
 const INITIAL_DATA: OnboardingData = {
-  workspaceType: null,
-  migrateMemory: true,
+  workspaceType: 'clawster',
   launchOnStartup: true,
-  gatewayUrl: 'http://127.0.0.1:18789',
+  aiProvider: DEFAULT_AI_PROVIDER,
+  gatewayUrl: DEFAULT_OPENROUTER_BASE_URL,
   gatewayToken: '',
-  identity: '',
-  soul: '',
+  gatewayModel: DEFAULT_OPENROUTER_MODEL,
   watchFolders: [],
   watchActiveApp: false,
   watchWindowTitles: false,
-  connectionTested: false,
   hotkeyOpenChat: 'CommandOrControl+Shift+Space',
   hotkeyCaptureScreen: 'CommandOrControl+Shift+/',
   hotkeyOpenAssistant: 'CommandOrControl+Shift+A',
 };
 
-type Step = 'welcome' | 'workspace' | 'memory' | 'connection' | 'personality' | 'watch' | 'hotkeys' | 'complete';
+type Step = 'welcome' | 'apiKeys' | 'watch' | 'hotkeys' | 'complete';
 
-const STEP_ORDER: Step[] = ['welcome', 'workspace', 'memory', 'connection', 'personality', 'watch', 'hotkeys', 'complete'];
+const STEP_ORDER: Step[] = ['welcome', 'apiKeys', 'watch', 'hotkeys', 'complete'];
 
 export function Onboarding() {
   const [currentStep, setCurrentStep] = useState<Step>('welcome');
@@ -62,24 +56,20 @@ export function Onboarding() {
   useEffect(() => {
     const loadDefaults = async () => {
       try {
-        const defaults = await window.clawster.getDefaultPersonality();
-        if (defaults.identity && defaults.soul) {
-          updateData({
-            identity: defaults.identity,
-            soul: defaults.soul,
-          });
-        }
-
-        // Try to auto-detect OpenClaw config
-        const config = await window.clawster.readOpenClawConfig();
-        if (config?.gateway) {
-          const port = config.gateway.port || 18789;
-          const token = config.gateway.auth?.token || '';
-          updateData({
-            gatewayUrl: `http://127.0.0.1:${port}`,
-            gatewayToken: token,
-          });
-        }
+        const settings = await window.clawster.getSettings() as {
+          clawbot?: {
+            provider?: ClawBotProvider;
+            url?: string;
+            token?: string;
+            model?: string;
+          };
+        };
+        updateData({
+          aiProvider: settings.clawbot?.provider || DEFAULT_AI_PROVIDER,
+          gatewayUrl: settings.clawbot?.url || DEFAULT_OPENROUTER_BASE_URL,
+          gatewayToken: '',
+          gatewayModel: settings.clawbot?.model || DEFAULT_OPENROUTER_MODEL,
+        });
       } catch (error) {
         console.error('Failed to load defaults:', error);
       }
@@ -98,32 +88,16 @@ export function Onboarding() {
   const goToNextStep = useCallback(() => {
     const currentIndex = STEP_ORDER.indexOf(currentStep);
     if (currentIndex < STEP_ORDER.length - 1) {
-      let nextStep = STEP_ORDER[currentIndex + 1];
-
-      // Skip memory and personality steps if using existing OpenClaw workspace
-      if (data.workspaceType === 'openclaw') {
-        if (nextStep === 'memory') nextStep = 'connection';
-        else if (nextStep === 'personality') nextStep = 'watch';
-      }
-
-      goToStep(nextStep);
+      goToStep(STEP_ORDER[currentIndex + 1]);
     }
-  }, [currentStep, data.workspaceType, goToStep]);
+  }, [currentStep, goToStep]);
 
   const goToPreviousStep = useCallback(() => {
     const currentIndex = STEP_ORDER.indexOf(currentStep);
     if (currentIndex > 0) {
-      let prevStep = STEP_ORDER[currentIndex - 1];
-
-      // Skip memory and personality steps if using existing OpenClaw workspace
-      if (data.workspaceType === 'openclaw') {
-        if (prevStep === 'memory') prevStep = 'workspace';
-        else if (prevStep === 'personality') prevStep = 'connection';
-      }
-
-      goToStep(prevStep);
+      goToStep(STEP_ORDER[currentIndex - 1]);
     }
-  }, [currentStep, data.workspaceType, goToStep]);
+  }, [currentStep, goToStep]);
 
   const handleSkip = useCallback(async () => {
     try {
@@ -134,26 +108,11 @@ export function Onboarding() {
   }, []);
 
   const handleComplete = useCallback(async () => {
-    if (!data.workspaceType) {
-      console.error('Workspace type not selected');
-      return;
-    }
-
     setIsCompleting(true);
 
     try {
-      // If creating a new Clawster workspace, create it first
-      if (data.workspaceType === 'clawster') {
-        await window.clawster.createClawsterWorkspace({
-          identity: data.identity,
-          soul: data.soul,
-          migrateMemory: data.migrateMemory,
-        });
-      }
-
       await window.clawster.onboardingComplete({
         ...data,
-        workspaceType: data.workspaceType,
       });
     } catch (error) {
       console.error('Failed to complete onboarding:', error);
@@ -163,18 +122,15 @@ export function Onboarding() {
 
   // Determine if next button should be disabled
   const isNextDisabled = () => {
-    if (currentStep === 'workspace' && !data.workspaceType) return true;
-    if (currentStep === 'connection' && !data.connectionTested) return true;
     return false;
   };
 
   // Get next button text
   const getNextButtonText = () => {
     if (currentStep === 'welcome') return 'Get Started';
-    if (currentStep === 'connection' && !data.connectionTested) return 'Test Connection First';
     if (currentStep === 'complete') {
       if (isCompleting) return 'Waking up...';
-      return 'Wake Up Clawster';
+      return 'Open Ayati - Quran Desktop Companion';
     }
     return 'Continue';
   };
@@ -199,14 +155,8 @@ export function Onboarding() {
     switch (currentStep) {
       case 'welcome':
         return <WelcomeStep {...props} />;
-      case 'workspace':
-        return <WorkspaceStep {...props} />;
-      case 'memory':
-        return <MemoryStep {...props} />;
-      case 'connection':
-        return <ConnectionStep {...props} />;
-      case 'personality':
-        return <PersonalityStep {...props} />;
+      case 'apiKeys':
+        return <ApiKeysStep {...props} />;
       case 'watch':
         return <WatchStep {...props} />;
       case 'hotkeys':
@@ -219,39 +169,40 @@ export function Onboarding() {
   };
 
   return (
-    <div className="w-full h-full bg-[#0f0f0f] rounded-xl shadow-2xl relative flex flex-col overflow-hidden"
-         style={{ boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05)' }}>
+    <div className="w-full h-full bg-[#AFF9C9] rounded-xl shadow-2xl relative flex flex-col overflow-hidden"
+         style={{ boxShadow: '0 25px 50px -12px rgba(7, 18, 15, 0.28), 0 0 0 1px rgba(7, 18, 15, 0.14)' }}>
 
-      {/* Top Bar (Draggable) - Chrome tab style */}
-      <div className="drag-region h-11 flex items-center px-4 w-full z-50 select-none bg-[#1a1a1a] border-b border-white/5 shrink-0">
-        {/* Close button (left side like macOS) */}
-        <button
-          className="no-drag w-3 h-3 rounded-full bg-[#ff5f57] hover:bg-[#ff5f57]/80 transition-colors cursor-pointer shrink-0"
-          onClick={handleSkip}
-          title="Close"
-        />
-
-        {/* Center: Title + Step Indicator */}
-        <div className="flex-1 flex items-center justify-center gap-3">
-          <span className="text-xs text-neutral-400 font-medium">Clawster Setup</span>
-          <div className="flex items-center gap-1.5">
-            {STEP_ORDER.map((step, index) => (
-              <div
-                key={step}
-                className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${
-                  index === currentStepIndex
-                    ? 'bg-[#FF8C69]'
-                    : index < currentStepIndex
-                    ? 'bg-[#008080]'
-                    : 'bg-neutral-700'
-                }`}
-              />
-            ))}
-          </div>
+      {/* Top Bar (Draggable) - macOS window chrome */}
+      <div className="drag-region h-11 flex items-center px-4 w-full z-50 select-none bg-[#ececec] border-b border-[#cfcfcf] shrink-0 relative">
+        <div className="absolute left-4 flex items-center gap-2">
+          <button
+            className="no-drag w-3 h-3 rounded-full bg-[#ff5f57] hover:bg-[#ff453a] transition-colors cursor-pointer shrink-0 border border-black/10"
+            onClick={handleSkip}
+            title="Close"
+            aria-label="Close setup"
+          />
+          <div className="w-3 h-3 rounded-full bg-[#febc2e] border border-black/10" aria-hidden="true" />
+          <div className="w-3 h-3 rounded-full bg-[#28c840] border border-black/10" aria-hidden="true" />
         </div>
 
-        {/* Right spacer for balance */}
-        <div className="w-3 shrink-0" />
+        <div className="flex-1 flex items-center justify-center">
+          <span className="brand-display text-xs text-[#242424] font-semibold">Ayati - Quran Desktop Companion Setup</span>
+        </div>
+
+        <div className="absolute right-4 flex items-center gap-1.5">
+          {STEP_ORDER.map((step, index) => (
+            <div
+              key={step}
+              className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${
+                index === currentStepIndex
+                  ? 'bg-[#666666]'
+                  : index < currentStepIndex
+                  ? 'bg-[#9a9a9a]'
+                  : 'bg-[#c8c8c8]'
+              }`}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Center Stage Content */}
@@ -262,12 +213,12 @@ export function Onboarding() {
       </div>
 
       {/* Action Footer */}
-      <div className="no-drag h-[72px] absolute bottom-0 w-full flex items-center justify-end gap-3 px-6 bg-[#0f0f0f]/90 backdrop-blur-md border-t border-white/5 z-50 select-none">
+      <div className="no-drag h-[72px] absolute bottom-0 w-full flex items-center justify-end gap-3 px-6 bg-[#AFF9C9]/92 backdrop-blur-md border-t border-[#07120f]/15 z-50 select-none">
         <button
           onClick={handleSkip}
-          className="px-4 py-2.5 rounded-lg text-sm font-medium text-neutral-400 hover:text-white hover:bg-white/5 transition-colors"
+          className="px-4 py-2.5 rounded-lg text-sm font-medium text-[#35584b] hover:text-[#07120f] hover:bg-[#7CF0BD]/55 transition-colors"
         >
-          Skip Setup
+          Skip setup
         </button>
 
         <button
@@ -275,8 +226,8 @@ export function Onboarding() {
           disabled={isNextDisabled() || isCompleting}
           className={`px-5 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
             isNextDisabled() || isCompleting
-              ? 'bg-[#FF8C69]/50 text-neutral-950/50 cursor-not-allowed'
-              : 'bg-[#FF8C69] text-neutral-950 hover:bg-[#ff7a50] shadow-[0_0_15px_rgba(255,140,105,0.2)]'
+              ? 'bg-[#07120f]/35 text-[#AFF9C9]/80 cursor-not-allowed'
+              : 'bg-[#07120f] text-[#AFF9C9] hover:bg-[#10231c] shadow-[0_10px_28px_rgba(7,18,15,0.18)]'
           }`}
         >
           {isCompleting && (

@@ -11,27 +11,55 @@ import {
   Tray,
   Menu,
   systemPreferences,
+  safeStorage,
 } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import { exec, execFile, execSync } from 'child_process';
+import { execFile, execSync } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import { config } from 'dotenv';
 import { autoUpdater } from 'electron-updater';
 import sharp from 'sharp';
 import { Watchers } from './watchers';
-import { ClawBotClient } from './clawbot-client';
+import {
+  buildChatCompletionsUrl,
+  ClawBotClient,
+  normalizeClawBotProvider,
+  type ClawBotProvider,
+} from './clawbot-client';
 import { createStore } from './store';
 import { TutorialManager } from './tutorial';
 import { getFrontmostWindowTitleFromSystemEvents } from './window-title';
+import { buildContextualQuranNudge } from './ayah-contextual-nudges';
+import { analyzeScreenForAyah } from './ayah-scene-analyzer';
+import { selectAyahCandidateWithAi } from './ayah-ai-selector';
+import { fetchVerseContentForReflection as fetchVerseContentWithFallback } from './ayah-reflection-content';
+import {
+  createDefaultAyahLensState,
+  deleteReflection,
+  markReflectionPendingSync,
+  markReflectionSynced,
+  saveReflectionLocally,
+  updateReflection,
+} from './ayah-reflection-store';
+import { rankAyahCandidates } from './ayah-theme-engine';
+import type { AyahLensSettings, AyahLensState, AyahReflection, QuranAuthStatus, QuranVerseContent } from './ayah-types';
+import { createPkcePair, QuranFoundationClient, QuranFoundationError, type StoredTokenSet } from './quran-foundation-client';
+import { QURAN_OAUTH_SCOPES } from './quran-oauth-scopes';
+import { resolveQuranClientConfig } from './quran-runtime-config';
+import { getDefaultClawBotModel } from './ai-provider-defaults';
+import { DEFAULT_HOTKEYS, sanitizeAccelerator } from './hotkeys';
+import { getAiProviderConfig } from './ai-providers';
+import { getWindowPositionNearAnchor } from './window-positioning';
 
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
-// Load environment variables
-config();
+// Load environment variables from repo root (.env then .env.local overrides)
+const repoRoot = process.cwd();
+config({ path: path.join(repoRoot, '.env') });
+config({ path: path.join(repoRoot, '.env.local'), override: true });
 
 // Fix transparent window rendering on some Mac hardware (e.g. Mac Mini)
 // Electron has a bug where transparent windows < 162px become opaque on external/4K displays
@@ -57,6 +85,7 @@ let watchers: Watchers | null = null;
 let clawbot: ClawBotClient | null = null;
 const store = createStore();
 const tutorialManager = new TutorialManager(store);
+let quranOAuthSession: { state: string; nonce: string; verifier: string } | null = null;
 
 const isDev = !app.isPackaged;
 const DEV_PORT = process.env.VITE_DEV_PORT || '5173';
@@ -67,6 +96,64 @@ const DEV_WINDOW_BORDER_CSS = `
   }
 `;
 const debugBorderStyleKeys = new WeakMap<BrowserWindow, string>();
+
+function getAssetPath(fileName: string): string {
+  return isDev
+    ? path.join(__dirname, '../../assets', fileName)
+    : path.join(process.resourcesPath, 'assets', fileName);
+}
+
+function getAppIconPath(): string {
+  return getAssetPath('icon.png');
+}
+
+function createAppIconImage(): Electron.NativeImage {
+  return nativeImage.createFromPath(getAppIconPath());
+}
+
+function applyDockIcon(): void {
+  if (process.platform !== 'darwin') return;
+  app.dock?.setIcon(getAppIconPath());
+}
+
+function getStoredClawBotProvider(): ClawBotProvider {
+  return normalizeClawBotProvider(store.get('clawbot.provider'));
+}
+
+function getStoredClawBotModel(provider: ClawBotProvider): string {
+  const model = store.get('clawbot.model') as string | undefined;
+  if (model && model.trim().length > 0) {
+    return model;
+  }
+  return getDefaultClawBotModel(provider);
+}
+
+function buildProviderHeaders(url: string, token: string, provider: ClawBotProvider): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (getAiProviderConfig(provider).protocol === 'anthropic-messages') {
+    if (token) {
+      headers['x-api-key'] = token;
+    }
+    headers['anthropic-version'] = '2023-06-01';
+    return headers;
+  }
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  try {
+    if (new URL(url).hostname.endsWith('openrouter.ai')) {
+      headers['X-OpenRouter-Title'] = 'Ayati - Quran Desktop Companion';
+    }
+  } catch {
+    if (url.includes('openrouter.ai')) {
+      headers['X-OpenRouter-Title'] = 'Ayati - Quran Desktop Companion';
+    }
+  }
+  return headers;
+}
 
 function shouldShowDebugWindowBorders(): boolean {
   return isDev && Boolean(store.get('dev.windowBorders'));
@@ -109,12 +196,298 @@ function applyDebugWindowBordersToAllWindows(): void {
   }
 }
 
+function getAyahLensState(): AyahLensState {
+  const stored = store.get('ayahLens') as AyahLensState | undefined;
+  if (!stored) {
+    const defaultState = createDefaultAyahLensState();
+    store.set('ayahLens', defaultState);
+    return defaultState;
+  }
+
+  const defaultState = createDefaultAyahLensState();
+  return {
+    ...defaultState,
+    ...stored,
+    quranConfig: { ...defaultState.quranConfig, ...stored.quranConfig },
+    quranAuth: { ...defaultState.quranAuth, ...stored.quranAuth },
+    contentAuth: { ...defaultState.contentAuth, ...stored.contentAuth },
+    preferences: { ...defaultState.preferences, ...stored.preferences },
+    reflections: stored.reflections ?? [],
+    pendingSync: stored.pendingSync ?? [],
+    recentVerseKeys: stored.recentVerseKeys ?? [],
+    nudgeState: { ...defaultState.nudgeState, ...stored.nudgeState },
+    verseCache: stored.verseCache ?? {},
+  };
+}
+
+function setAyahLensState(nextState: AyahLensState): void {
+  store.set('ayahLens', nextState);
+}
+
+function getQuranClient(): QuranFoundationClient {
+  return new QuranFoundationClient(resolveQuranClientConfig({
+    state: getAyahLensState(),
+    env: process.env,
+    decryptSecret,
+  }));
+}
+
+function encryptSecret(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (safeStorage.isEncryptionAvailable()) {
+    return safeStorage.encryptString(value).toString('base64');
+  }
+  return Buffer.from(value, 'utf8').toString('base64');
+}
+
+function decryptSecret(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  try {
+    const buffer = Buffer.from(value, 'base64');
+    if (safeStorage.isEncryptionAvailable()) {
+      return safeStorage.decryptString(buffer);
+    }
+    return buffer.toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+function persistQuranUserTokens(tokens: StoredTokenSet): QuranAuthStatus {
+  const state = getAyahLensState();
+  const nextState: AyahLensState = {
+    ...state,
+    quranAuth: {
+      encryptedAccessToken: encryptSecret(tokens.accessToken),
+      encryptedRefreshToken: encryptSecret(tokens.refreshToken),
+      expiresAt: tokens.expiresAt,
+      scopes: tokens.scopes,
+      userName: tokens.userName,
+    },
+  };
+  setAyahLensState(nextState);
+  return getQuranAuthStatusFromState(nextState);
+}
+
+function getQuranAuthStatusFromState(state: AyahLensState): QuranAuthStatus {
+  const hasToken = Boolean(state.quranAuth.encryptedAccessToken || state.quranAuth.encryptedRefreshToken);
+  return {
+    isConnected: hasToken && Boolean(state.quranAuth.expiresAt),
+    userName: state.quranAuth.userName,
+    scopes: state.quranAuth.scopes,
+    expiresAt: state.quranAuth.expiresAt ?? undefined,
+  };
+}
+
+function getQuranAuthStatus(): QuranAuthStatus {
+  return getQuranAuthStatusFromState(getAyahLensState());
+}
+
+async function getQuranUserAccessToken(): Promise<string | null> {
+  const state = getAyahLensState();
+  const accessToken = decryptSecret(state.quranAuth.encryptedAccessToken);
+  const expiresAt = state.quranAuth.expiresAt ?? 0;
+
+  if (accessToken && expiresAt > Date.now() + 60_000) {
+    return accessToken;
+  }
+
+  const refreshToken = decryptSecret(state.quranAuth.encryptedRefreshToken);
+  if (!refreshToken) {
+    return accessToken;
+  }
+
+  try {
+    const tokens = await getQuranClient().refreshToken(refreshToken);
+    persistQuranUserTokens({
+      ...tokens,
+      refreshToken: tokens.refreshToken ?? refreshToken,
+      userName: tokens.userName ?? state.quranAuth.userName,
+    });
+    return tokens.accessToken;
+  } catch {
+    const nextState: AyahLensState = {
+      ...state,
+      quranAuth: {
+        encryptedAccessToken: null,
+        encryptedRefreshToken: null,
+        expiresAt: null,
+        scopes: [],
+      },
+    };
+    setAyahLensState(nextState);
+    return null;
+  }
+}
+
+function getSafeErrorMessage(error: unknown): string {
+  if (error instanceof QuranFoundationError) {
+    return error.safeMessage;
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return 'Quran Foundation content API failed. Try again later.';
+}
+
+async function getQuranContentAccessToken(): Promise<string> {
+  const userToken = await getQuranUserAccessToken();
+  if (userToken) return userToken;
+
+  const state = getAyahLensState();
+  const contentToken = decryptSecret(state.contentAuth.encryptedAccessToken);
+  if (contentToken && (state.contentAuth.expiresAt ?? 0) > Date.now() + 60_000) {
+    return contentToken;
+  }
+
+  const tokens = await getQuranClient().requestContentToken();
+  setAyahLensState({
+    ...state,
+    contentAuth: {
+      encryptedAccessToken: encryptSecret(tokens.accessToken),
+      expiresAt: tokens.expiresAt,
+    },
+  });
+  return tokens.accessToken;
+}
+
+async function fetchVerseContentForReflection(verseKey: string): Promise<QuranVerseContent> {
+  const state = getAyahLensState();
+  const cacheKey = `${verseKey}:${state.preferences.translationId}`;
+  const cached = state.verseCache[cacheKey];
+  if (cached) return cached;
+
+  return fetchVerseContentWithFallback(verseKey, async () => {
+    const accessToken = await getQuranContentAccessToken();
+    const verse = await getQuranClient().fetchVerseContent(
+      accessToken,
+      verseKey,
+      state.preferences.translationId,
+    );
+    setAyahLensState({
+      ...getAyahLensState(),
+      verseCache: {
+        ...getAyahLensState().verseCache,
+        [cacheKey]: verse,
+      },
+    });
+    return verse;
+  });
+}
+
+async function captureAyahReflection(): Promise<AyahReflection> {
+  isCapturingAyahReflection = true;
+  let capture: Awaited<ReturnType<typeof captureScreenWithContext>> | null = null;
+
+  try {
+    await playPetCameraSnapAnimationBeforeCapture();
+    capture = await captureScreenWithContext();
+    if (!capture) {
+      throw new Error('Screen capture was unavailable. Check Screen Recording permission and try again.');
+    }
+
+    const insight = await analyzeScreenForAyah(clawbot, capture.image);
+    const candidates = rankAyahCandidates(insight, getAyahLensState().recentVerseKeys);
+    const candidate = await selectAyahCandidateWithAi(clawbot, insight, candidates);
+    const verse = await fetchVerseContentForReflection(candidate.verseKey);
+    const reflection = buildAyahReflection(verse, candidate, insight);
+    setAyahLensState(saveReflectionLocally(getAyahLensState(), reflection));
+    return reflection;
+  } finally {
+    if (capture) {
+      capture.image = '';
+    }
+    isCapturingAyahReflection = false;
+  }
+}
+
+function buildAyahReflection(
+  verse: QuranVerseContent,
+  candidate: ReturnType<typeof rankAyahCandidates>[number],
+  insight: Awaited<ReturnType<typeof analyzeScreenForAyah>>,
+): AyahReflection {
+  return {
+    id: randomUUID(),
+    verseKey: verse.verseKey,
+    surahName: verse.surahName,
+    ayahNumber: verse.ayahNumber,
+    arabicText: verse.arabicText,
+    translation: verse.translation,
+    translatorId: verse.translatorId,
+    reflection: candidate.reflection,
+    whyThisVerse: insight.fallbackReason
+      ? `${candidate.whyThisVerse} ${insight.fallbackReason}`
+      : candidate.whyThisVerse,
+    screenSummary: insight.summary,
+    themes: insight.themes,
+    createdAt: Date.now(),
+    syncState: 'local',
+  };
+}
+
+async function saveAyahReflectionById(reflectionId: string): Promise<AyahReflection | null> {
+  const state = getAyahLensState();
+  const reflection = state.reflections.find((item) => item.id === reflectionId);
+  if (!reflection) return null;
+
+  const savedReflection: AyahReflection = {
+    ...reflection,
+    savedAt: reflection.savedAt ?? Date.now(),
+  };
+  setAyahLensState(updateReflection(state, savedReflection));
+
+  const accessToken = await getQuranUserAccessToken();
+  if (!accessToken) {
+    return savedReflection;
+  }
+
+  try {
+    const result = await getQuranClient().createBookmark(accessToken, {
+      verseKey: reflection.verseKey,
+      mushafId: state.preferences.mushafId,
+    });
+    const syncedState = markReflectionSynced(getAyahLensState(), reflectionId, result.bookmarkId);
+    setAyahLensState(syncedState);
+    return syncedState.reflections.find((item) => item.id === reflectionId) ?? savedReflection;
+  } catch {
+    const pendingState = markReflectionPendingSync(getAyahLensState(), reflectionId, 'bookmark');
+    setAyahLensState(pendingState);
+    return pendingState.reflections.find((item) => item.id === reflectionId) ?? savedReflection;
+  }
+}
+
+function updateAyahLensSetting(key: string, value: unknown): AyahLensSettings {
+  const state = getAyahLensState();
+  const preferences = { ...state.preferences };
+
+  if (key === 'translationId' && typeof value === 'number' && Number.isInteger(value) && value > 0) {
+    preferences.translationId = value;
+  } else if (key === 'mushafId' && typeof value === 'number' && [1, 2, 3, 4, 5, 6, 7, 11, 19].includes(value)) {
+    preferences.mushafId = value;
+  } else if (key === 'defaultSave' && typeof value === 'boolean') {
+    preferences.defaultSave = value;
+  } else if (key === 'contextualNudges' && typeof value === 'boolean') {
+    preferences.contextualNudges = value;
+  } else if (key === 'nudgeCooldownMinutes' && typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 240) {
+    preferences.nudgeCooldownMinutes = value;
+  } else if (key === 'maxNudgesPerDay' && typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 48) {
+    preferences.maxNudgesPerDay = value;
+  } else {
+    throw new Error('Unknown or invalid Ayati - Quran Desktop Companion setting.');
+  }
+
+  setAyahLensState({ ...state, preferences });
+  return preferences;
+}
+
 // Idle detection state
 let lastActivityTime = Date.now();
 let idleCheckInterval: NodeJS.Timeout | null = null;
-let lastAppSwitchChat = 0;
+let isCapturingAyahReflection = false;
 const IDLE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
-const APP_SWITCH_CHAT_COOLDOWN = 60 * 1000; // 1 minute between app switch chats
 
 // Pet movement animation state
 let moveAnimation: NodeJS.Timeout | null = null;
@@ -125,6 +498,7 @@ const PET_WINDOW_WIDTH = 164;
 const PET_WINDOW_HEIGHT = 164;
 const PET_WINDOW_TUTORIAL_WIDTH = 320;
 const PET_WINDOW_TUTORIAL_HEIGHT = 350;
+const PET_WAKE_FLIGHT_DURATION_MS = 1100;
 const PET_CHAT_MIN_WIDTH = 220;
 const PET_CHAT_MAX_WIDTH = 360;
 const PET_CHAT_MIN_HEIGHT = 90;
@@ -135,8 +509,17 @@ const ASSISTANT_VERTICAL_GAP = -3;
 const WORKSPACE_BROWSER_VERTICAL_GAP = -6;
 const PET_CONTEXT_MENU_WIDTH = 220;
 const PET_CONTEXT_MENU_HEIGHT = 342;
+const PET_WAKE_FLIGHT_KEYFRAMES = [
+  { progress: 0, x: 0, y: 0 },
+  { progress: 0.24, x: -10, y: -24 },
+  { progress: 0.58, x: 12, y: -56 },
+  { progress: 0.8, x: 6, y: -18 },
+  { progress: 1, x: 0, y: 0 },
+];
 const WORKSPACE_BROWSER_WIDTH = 420;
 const WORKSPACE_BROWSER_HEIGHT = 520;
+const SCREENSHOT_QUESTION_WIDTH = 520;
+const SCREENSHOT_QUESTION_HEIGHT = 280;
 const PET_CAMERA_SNAP_CAPTURE_DELAY_MS = 560;
 const PET_CAMERA_SNAP_DURATION_MS = 920;
 const PET_CAMERA_SNAP_FLASH_DURATION_MS = 120;
@@ -153,7 +536,7 @@ const IDLE_BEHAVIOR_MIN_INTERVAL = 3000; // Minimum 3 seconds between behaviors 
 const IDLE_BEHAVIOR_MAX_INTERVAL = 8000; // Maximum 8 seconds between behaviors (demo mode)
 const INTERACTION_COOLDOWN = 5000; // Wait 5 seconds after interaction before idle behaviors
 
-type IdleBehavior = 'look_around' | 'snip_claws' | 'yawn' | 'wander' | 'stretch' | 'blink' | 'wiggle';
+type IdleBehavior = 'look_around' | 'snip_claws' | 'yawn' | 'wander' | 'stretch' | 'blink' | 'wiggle' | 'wave';
 
 const IDLE_BEHAVIORS: { type: IdleBehavior; weight: number }[] = [
   { type: 'blink', weight: 25 },        // Most common
@@ -161,6 +544,7 @@ const IDLE_BEHAVIORS: { type: IdleBehavior; weight: number }[] = [
   { type: 'snip_claws', weight: 15 },
   { type: 'wiggle', weight: 15 },
   { type: 'stretch', weight: 10 },
+  { type: 'wave', weight: 8 },
   { type: 'yawn', weight: 10 },
   { type: 'wander', weight: 5 },        // Least common
 ];
@@ -192,7 +576,7 @@ interface PetAction {
   duration?: number;
 }
 
-type WorkspaceType = 'openclaw' | 'clawster';
+type WorkspaceType = 'clawster';
 type WorkspaceErrorCode = 'missing_workspace' | 'path_not_found' | 'outside_workspace' | 'not_directory' | 'open_failed';
 type WorkspacePreviewKind = 'markdown' | 'image' | 'json';
 type WorkspacePreviewErrorCode =
@@ -245,28 +629,19 @@ const MAX_JSON_PREVIEW_BYTES = 1024 * 1024 * 2;
 
 function getCurrentWorkspaceType(): WorkspaceType | null {
   const workspaceType = store.get('onboarding.workspaceType');
-  return workspaceType === 'openclaw' || workspaceType === 'clawster' ? workspaceType : null;
+  return workspaceType === 'clawster' ? workspaceType : null;
 }
 
-function getDefaultOpenClawWorkspacePath(): string {
-  return path.join(os.homedir(), '.openclaw', 'workspace');
+function getDefaultAyahLensWorkspacePath(): string {
+  return path.join(app.getPath('userData'), 'workspace');
 }
 
 function resolveWorkspaceRootPath(workspaceType: WorkspaceType | null): { workspaceType: WorkspaceType; workspacePath: string } {
-  const openClawWorkspace = getDefaultOpenClawWorkspacePath();
-
-  if (workspaceType === 'clawster') {
-    const clawsterWorkspace = (store.get('onboarding.clawsterWorkspacePath') as string | null)
-      ?? path.join(os.homedir(), '.openclaw', 'workspace-clawster');
-
-    if (fs.existsSync(clawsterWorkspace) || !fs.existsSync(openClawWorkspace)) {
-      return { workspaceType: 'clawster', workspacePath: clawsterWorkspace };
-    }
-  }
-
+  const workspacePath = (store.get('onboarding.clawsterWorkspacePath') as string | null)
+    ?? getDefaultAyahLensWorkspacePath();
   return {
-    workspaceType: 'openclaw',
-    workspacePath: openClawWorkspace,
+    workspaceType: workspaceType ?? 'clawster',
+    workspacePath,
   };
 }
 
@@ -589,17 +964,106 @@ function animateMoveTo(targetX: number, targetY: number, duration: number = 1000
       petWindow?.setPosition(currentX, currentY);
       updatePetChatPosition();
       updateAssistantPosition();
+      updateScreenshotQuestionPosition();
       updateWorkspaceBrowserPosition();
 
       if (progress >= 1) {
         clearInterval(moveAnimation!);
         moveAnimation = null;
-      store.set('pet.position', { x: targetX, y: targetY });
-      petWindow?.webContents.send('pet-moving', { moving: false });
-      updateWorkspaceBrowserPosition();
-      resolve();
+        store.set('pet.position', { x: targetX, y: targetY });
+        petWindow?.webContents.send('pet-moving', { moving: false });
+        updateScreenshotQuestionPosition();
+        updateWorkspaceBrowserPosition();
+        resolve();
       }
     }, 16); // ~60fps
+  });
+}
+
+function getPetWakeFlightOffset(progress: number): { x: number; y: number } {
+  for (let i = 1; i < PET_WAKE_FLIGHT_KEYFRAMES.length; i += 1) {
+    const previous = PET_WAKE_FLIGHT_KEYFRAMES[i - 1];
+    const next = PET_WAKE_FLIGHT_KEYFRAMES[i];
+    if (progress > next.progress) continue;
+
+    const segmentProgress = (progress - previous.progress) / (next.progress - previous.progress);
+    const eased = 1 - Math.pow(1 - segmentProgress, 3);
+    return {
+      x: previous.x + (next.x - previous.x) * eased,
+      y: previous.y + (next.y - previous.y) * eased,
+    };
+  }
+
+  return { x: 0, y: 0 };
+}
+
+function clampPetWindowPosition(x: number, y: number): { x: number; y: number } {
+  if (!petWindow || petWindow.isDestroyed()) return { x, y };
+
+  const bounds = petWindow.getBounds();
+  const display = screen.getDisplayNearestPoint({
+    x: Math.round(x + bounds.width / 2),
+    y: Math.round(y + bounds.height / 2),
+  });
+  const maxX = display.workArea.x + display.workArea.width - bounds.width;
+  const maxY = display.workArea.y + display.workArea.height - bounds.height;
+
+  return {
+    x: Math.max(display.workArea.x, Math.min(Math.round(x), maxX)),
+    y: Math.max(display.workArea.y, Math.min(Math.round(y), maxY)),
+  };
+}
+
+function animatePetWindowWakeFlight(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!petWindow || petWindow.isDestroyed()) {
+      resolve();
+      return;
+    }
+
+    if (moveAnimation) {
+      clearInterval(moveAnimation);
+      moveAnimation = null;
+      petWindow.webContents.send('pet-moving', { moving: false });
+    }
+
+    const [startX, startY] = petWindow.getPosition();
+    const startTime = Date.now();
+
+    moveAnimation = setInterval(() => {
+      if (!petWindow || petWindow.isDestroyed()) {
+        if (moveAnimation) {
+          clearInterval(moveAnimation);
+          moveAnimation = null;
+        }
+        resolve();
+        return;
+      }
+
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / PET_WAKE_FLIGHT_DURATION_MS, 1);
+      const offset = getPetWakeFlightOffset(progress);
+      const nextPosition = progress >= 1
+        ? { x: startX, y: startY }
+        : clampPetWindowPosition(startX + offset.x, startY + offset.y);
+
+      petWindow.setPosition(nextPosition.x, nextPosition.y);
+      updatePetChatPosition();
+      updateAssistantPosition();
+      updateScreenshotQuestionPosition();
+      updateWorkspaceBrowserPosition();
+
+      if (progress >= 1) {
+        clearInterval(moveAnimation!);
+        moveAnimation = null;
+        store.set('pet.position', { x: startX, y: startY });
+        updatePetChatPosition();
+        updateAssistantPosition();
+        updateScreenshotQuestionPosition();
+        updateWorkspaceBrowserPosition();
+        resolve();
+      }
+    }, 16);
   });
 }
 
@@ -712,6 +1176,10 @@ async function performIdleBehavior(behavior: IdleBehavior): Promise<void> {
       case 'wiggle':
         // Happy little wiggle
         petWindow.webContents.send('idle-behavior', { type: 'wiggle' });
+        break;
+
+      case 'wave':
+        petWindow.webContents.send('idle-behavior', { type: 'wave' });
         break;
 
       case 'wander':
@@ -1035,10 +1503,7 @@ async function executePetAction(action: PetAction): Promise<void> {
       break;
 
     case 'wave':
-      petWindow.webContents.send('clawbot-mood', { state: 'happy' });
-      setTimeout(() => {
-        petWindow?.webContents.send('clawbot-mood', { state: 'idle' });
-      }, 3000);
+      petWindow.webContents.send('idle-behavior', { type: 'wave' });
       break;
 
     case 'look_at':
@@ -1098,6 +1563,66 @@ async function sendChatPopup(
   }
 }
 
+function hasActiveConversationSurface(): boolean {
+  return Boolean(
+    (petChatWindow && !petChatWindow.isDestroyed() && petChatWindow.isVisible())
+    || (chatbarWindow && !chatbarWindow.isDestroyed() && chatbarWindow.isVisible())
+    || (assistantWindow && !assistantWindow.isDestroyed() && assistantWindow.isVisible())
+    || (screenshotQuestionWindow && !screenshotQuestionWindow.isDestroyed() && screenshotQuestionWindow.isVisible())
+  );
+}
+
+async function maybeSendContextualQuranNudge(
+  appName: string,
+  windowTitle?: string,
+  options: { force?: boolean } = {},
+): Promise<boolean> {
+  if (
+    !petWindow
+    || tutorialManager?.getStatus().isActive
+    || isCapturingAyahReflection
+    || (!options.force && hasActiveConversationSurface())
+  ) {
+    return false;
+  }
+
+  const state = getAyahLensState();
+  let result: Awaited<ReturnType<typeof buildContextualQuranNudge>>;
+  try {
+    result = await buildContextualQuranNudge({
+      app: appName,
+      title: windowTitle,
+      now: Date.now(),
+      settings: state.preferences,
+      nudgeState: state.nudgeState,
+      recentVerseKeys: state.recentVerseKeys,
+      fetchVerseContent: fetchVerseContentForReflection,
+      ignoreLimits: options.force,
+    });
+  } catch (error) {
+    const message = getSafeErrorMessage(error);
+    console.error('[Ayati - Quran Desktop Companion] Failed to build contextual Quran nudge:', error);
+    petWindow.webContents.send('chat-popup', {
+      id: randomUUID(),
+      text: `Quran Foundation error: ${message}`,
+      trigger: 'app_switch',
+      quickReplies: ['Got it', 'Not now'],
+    });
+    return false;
+  }
+
+  if (!result) return false;
+
+  const nextState = saveReflectionLocally({
+    ...getAyahLensState(),
+    nudgeState: result.nextState,
+  }, result.reflection);
+  setAyahLensState(nextState);
+  resetInteractionTimer();
+  petWindow.webContents.send('chat-popup', result.message);
+  return true;
+}
+
 // Start idle detection
 function startIdleDetection() {
   idleCheckInterval = setInterval(() => {
@@ -1135,6 +1660,7 @@ function expandPetWindowForTutorial(): void {
 
   petWindow.setSize(PET_WINDOW_TUTORIAL_WIDTH, PET_WINDOW_TUTORIAL_HEIGHT);
   petWindow.setPosition(Math.round(safeX), Math.round(safeY));
+  updateScreenshotQuestionPosition();
   updateWorkspaceBrowserPosition();
   petWindow.webContents.send('tutorial-window-expanded', true);
   console.log('[Tutorial] Pet window expanded for tutorial');
@@ -1152,6 +1678,7 @@ function contractPetWindow(): void {
 
   petWindow.setSize(PET_WINDOW_WIDTH, PET_WINDOW_HEIGHT);
   petWindow.setPosition(Math.round(newX), Math.round(newY));
+  updateScreenshotQuestionPosition();
   updateWorkspaceBrowserPosition();
   petWindow.webContents.send('tutorial-window-expanded', false);
   console.log('[Tutorial] Pet window contracted to normal');
@@ -1182,6 +1709,7 @@ function createPetWindow() {
     skipTaskbar: true,
     hasShadow: false,
     roundedCorners: false,
+    icon: getAppIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1222,7 +1750,7 @@ function schedulePetChatAutoHide() {
   }, PET_CHAT_AUTO_HIDE_MS);
 }
 
-function showPetChat(message: { id: string; text: string; quickReplies?: string[] }) {
+function showPetChat(message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) {
   if (!petWindow) return;
 
   // Don't show chat popups during tutorial
@@ -1262,6 +1790,7 @@ function showPetChat(message: { id: string; text: string; quickReplies?: string[
       resizable: false,
       skipTaskbar: true,
       hasShadow: false,
+      icon: getAppIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
@@ -1369,16 +1898,15 @@ function updateAssistantPosition() {
   const [petX, petY] = petWindow.getPosition();
   const [petWidth] = petWindow.getSize();
   const [assistantWidth, assistantHeight] = assistantWindow.getSize();
-  const { width: screenWidth } = screen.getPrimaryDisplay().workAreaSize;
+  const { workArea } = screen.getPrimaryDisplay();
+  const position = getWindowPositionNearAnchor({
+    anchor: { x: petX, y: petY, width: petWidth, height: PET_WINDOW_HEIGHT },
+    windowSize: { width: assistantWidth, height: assistantHeight },
+    workArea,
+    verticalGap: ASSISTANT_VERTICAL_GAP,
+  });
 
-  // Center assistant above pet with configurable vertical gap
-  let assistantX = petX + (petWidth - assistantWidth) / 2;
-  const assistantY = petY - assistantHeight + ASSISTANT_VERTICAL_GAP;
-
-  // Keep within screen bounds
-  assistantX = Math.max(0, Math.min(assistantX, screenWidth - assistantWidth));
-
-  assistantWindow.setPosition(Math.round(assistantX), Math.max(0, Math.round(assistantY)));
+  assistantWindow.setPosition(position.x, position.y);
 }
 
 function updateWorkspaceBrowserPosition() {
@@ -1387,14 +1915,32 @@ function updateWorkspaceBrowserPosition() {
   const [petX, petY] = petWindow.getPosition();
   const [petWidth] = petWindow.getSize();
   const [browserWidth, browserHeight] = workspaceBrowserWindow.getSize();
-  const { width: screenWidth } = screen.getPrimaryDisplay().workAreaSize;
+  const { workArea } = screen.getPrimaryDisplay();
+  const position = getWindowPositionNearAnchor({
+    anchor: { x: petX, y: petY, width: petWidth, height: PET_WINDOW_HEIGHT },
+    windowSize: { width: browserWidth, height: browserHeight },
+    workArea,
+    verticalGap: WORKSPACE_BROWSER_VERTICAL_GAP,
+  });
 
-  let browserX = petX + (petWidth - browserWidth) / 2;
-  const browserY = petY - browserHeight + WORKSPACE_BROWSER_VERTICAL_GAP;
+  workspaceBrowserWindow.setPosition(position.x, position.y);
+}
 
-  browserX = Math.max(0, Math.min(browserX, screenWidth - browserWidth));
+function updateScreenshotQuestionPosition() {
+  if (!petWindow || !screenshotQuestionWindow || !screenshotQuestionWindow.isVisible()) return;
 
-  workspaceBrowserWindow.setPosition(Math.round(browserX), Math.max(0, Math.round(browserY)));
+  const [petX, petY] = petWindow.getPosition();
+  const [petWidth] = petWindow.getSize();
+  const [questionWidth, questionHeight] = screenshotQuestionWindow.getSize();
+  const { workArea } = screen.getPrimaryDisplay();
+  const position = getWindowPositionNearAnchor({
+    anchor: { x: petX, y: petY, width: petWidth, height: PET_WINDOW_HEIGHT },
+    windowSize: { width: questionWidth, height: questionHeight },
+    workArea,
+    verticalGap: ASSISTANT_VERTICAL_GAP,
+  });
+
+  screenshotQuestionWindow.setPosition(position.x, position.y);
 }
 
 function revealAssistantWindow() {
@@ -1467,6 +2013,7 @@ function createAssistantWindow() {
     resizable: true,
     show: false,
     backgroundColor: '#1a1a2e',
+    icon: getAppIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1511,6 +2058,7 @@ function createPetContextMenuWindow() {
     show: false,
     skipTaskbar: true,
     hasShadow: false,
+    icon: getAppIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1571,6 +2119,7 @@ function createWorkspaceBrowserWindow() {
     resizable: true,
     show: false,
     backgroundColor: '#0f1720',
+    icon: getAppIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1664,6 +2213,7 @@ function createChatbarWindow() {
     show: false,
     skipTaskbar: true,
     hasShadow: false,
+    icon: getAppIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1710,6 +2260,7 @@ function createScreenshotQuestionWindow() {
   if (screenshotQuestionWindow) {
     console.log('[ScreenshotQuestion] Window exists, showing and refocusing');
     screenshotQuestionWindow.show();
+    updateScreenshotQuestionPosition();
     screenshotQuestionWindow.focus();
     // Trigger a fresh screenshot capture
     screenshotQuestionWindow.webContents.send('retake-screenshot');
@@ -1720,16 +2271,28 @@ function createScreenshotQuestionWindow() {
   const display = screen.getDisplayNearestPoint(cursor);
   const { width: screenWidth, height: screenHeight } = display.workAreaSize;
 
-  const windowWidth = 520;
-  const windowHeight = 280;
+  const windowWidth = SCREENSHOT_QUESTION_WIDTH;
+  const windowHeight = SCREENSHOT_QUESTION_HEIGHT;
 
-  // Position near cursor, but keep within screen bounds
   let x = Math.round(cursor.x - windowWidth / 2);
   let y = Math.round(cursor.y - windowHeight - 20);
 
-  // Clamp to screen bounds
-  x = Math.max(display.workArea.x, Math.min(x, display.workArea.x + screenWidth - windowWidth));
-  y = Math.max(display.workArea.y, Math.min(y, display.workArea.y + screenHeight - windowHeight));
+  if (petWindow) {
+    const [petX, petY] = petWindow.getPosition();
+    const [petWidth] = petWindow.getSize();
+    const { workArea } = screen.getPrimaryDisplay();
+    const position = getWindowPositionNearAnchor({
+      anchor: { x: petX, y: petY, width: petWidth, height: PET_WINDOW_HEIGHT },
+      windowSize: { width: windowWidth, height: windowHeight },
+      workArea,
+      verticalGap: ASSISTANT_VERTICAL_GAP,
+    });
+    x = position.x;
+    y = position.y;
+  } else {
+    x = Math.max(display.workArea.x, Math.min(x, display.workArea.x + screenWidth - windowWidth));
+    y = Math.max(display.workArea.y, Math.min(y, display.workArea.y + screenHeight - windowHeight));
+  }
 
   screenshotQuestionWindow = new BrowserWindow({
     width: windowWidth,
@@ -1744,6 +2307,7 @@ function createScreenshotQuestionWindow() {
     show: false,
     skipTaskbar: true,
     hasShadow: false,
+    icon: getAppIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1810,7 +2374,8 @@ function createOnboardingWindow(): Promise<void> {
       minWidth: 500,
       minHeight: 550,
       show: false,
-      backgroundColor: '#1a1a2e',
+      backgroundColor: '#AFF9C9',
+      icon: getAppIconPath(),
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
@@ -1887,10 +2452,12 @@ function startMainApp() {
   // Initialize ClawBot client
   const clawbotUrl = store.get('clawbot.url') as string;
   const clawbotToken = store.get('clawbot.token') as string;
-  const workspaceType = store.get('onboarding.workspaceType') as string | null;
-  // Only use 'clawster' agent-id if user chose to create a Clawster workspace
-  const agentId = workspaceType === 'clawster' ? 'clawster' : null;
-  clawbot = new ClawBotClient(clawbotUrl, clawbotToken, agentId);
+  const clawbotProvider = getStoredClawBotProvider();
+  const clawbotModel = getStoredClawBotModel(clawbotProvider);
+  clawbot = new ClawBotClient(clawbotUrl, clawbotToken, null, {
+    provider: clawbotProvider,
+    model: clawbotModel,
+  });
 
   // Forward connection status changes to all renderer windows
   clawbot.on('connection-changed', (status: { connected: boolean; error: string | null; gatewayUrl: string }) => {
@@ -1914,16 +2481,9 @@ function startMainApp() {
     // Forward to assistant window
     assistantWindow?.webContents.send('activity-event', event);
 
-    // Trigger chat popup on app switch (with cooldown)
+    // Trigger Quran-connected contextual nudges on app switch.
     if (event.type === 'app_focus_changed' && event.app) {
-      const now = Date.now();
-      if (now - lastAppSwitchChat > APP_SWITCH_CHAT_COOLDOWN) {
-        lastAppSwitchChat = now;
-        // Random chance to show chat (30% of the time to not be annoying)
-        if (Math.random() < 0.3) {
-          sendChatPopup('app_switch', event.app, event.title);
-        }
-      }
+      void maybeSendContextualQuranNudge(event.app, event.title);
     }
   });
 
@@ -2101,7 +2661,9 @@ function setupIPC() {
       console.warn('[Dev] Failed to resolve active app for forced comment:', error);
     }
 
-    await sendChatPopup('app_switch', activeApp, activeWindowTitle);
+    if (activeApp) {
+      await maybeSendContextualQuranNudge(activeApp, activeWindowTitle, { force: true });
+    }
     return true;
   });
 
@@ -2191,7 +2753,8 @@ function setupIPC() {
 
   // Update settings
   ipcMain.handle('update-settings', (_event, key: string, value: unknown) => {
-    store.set(key, value);
+    const normalizedValue = normalizeSettingsValue(key, value);
+    store.set(key, normalizedValue);
 
     // Restart watchers if watch settings changed
     if (key.startsWith('watch.')) {
@@ -2207,7 +2770,9 @@ function setupIPC() {
     if (key.startsWith('clawbot.')) {
       const url = store.get('clawbot.url') as string;
       const token = store.get('clawbot.token') as string;
-      clawbot?.updateConfig(url, token);
+      const provider = getStoredClawBotProvider();
+      const model = getStoredClawBotModel(provider);
+      clawbot?.updateConfig(url, token, null, { provider, model });
     }
 
     if (key === 'pet.transparentWhenSleeping') {
@@ -2223,6 +2788,116 @@ function setupIPC() {
     }
 
     return store.store;
+  });
+
+  ipcMain.handle('quran-auth-start', () => {
+    const pkce = createPkcePair();
+    const state = randomUUID();
+    const nonce = randomUUID();
+    quranOAuthSession = { state, nonce, verifier: pkce.verifier };
+
+    const authorizeUrl = getQuranClient().buildAuthorizeUrl({
+      state,
+      nonce,
+      codeChallenge: pkce.challenge,
+      scopes: QURAN_OAUTH_SCOPES,
+    });
+
+    return { authorizeUrl };
+  });
+
+  ipcMain.handle('quran-auth-complete', async (_event, callbackUrl: string) => {
+    try {
+      const url = new URL(callbackUrl);
+      const error = url.searchParams.get('error');
+      if (error) {
+        return {
+          isConnected: false,
+          scopes: [],
+          error: 'Quran Foundation sign-in was cancelled or denied.',
+        } satisfies QuranAuthStatus;
+      }
+
+      const state = url.searchParams.get('state');
+      const code = url.searchParams.get('code');
+      if (!code || !quranOAuthSession || state !== quranOAuthSession.state) {
+        return {
+          isConnected: false,
+          scopes: [],
+          error: 'Quran Foundation sign-in callback could not be verified.',
+        } satisfies QuranAuthStatus;
+      }
+
+      const tokens = await getQuranClient().exchangeAuthorizationCode(
+        code,
+        quranOAuthSession.verifier,
+        quranOAuthSession.nonce,
+      );
+      quranOAuthSession = null;
+      return persistQuranUserTokens(tokens);
+    } catch (error) {
+      const safeMessage = error instanceof QuranFoundationError
+        ? error.safeMessage
+        : 'Quran Foundation sign-in failed.';
+      return {
+        isConnected: false,
+        scopes: [],
+        error: safeMessage,
+      } satisfies QuranAuthStatus;
+    }
+  });
+
+  ipcMain.handle('quran-auth-status', () => {
+    return getQuranAuthStatus();
+  });
+
+  ipcMain.handle('quran-auth-disconnect', () => {
+    const state = getAyahLensState();
+    setAyahLensState({
+      ...state,
+      quranAuth: {
+        encryptedAccessToken: null,
+        encryptedRefreshToken: null,
+        expiresAt: null,
+        scopes: [],
+      },
+    });
+    return true;
+  });
+
+  ipcMain.handle('ayah-capture-reflection', async () => {
+    return await captureAyahReflection();
+  });
+
+  ipcMain.handle('ayah-save-reflection', async (_event, reflectionId: string) => {
+    if (typeof reflectionId !== 'string' || !reflectionId.trim()) {
+      return null;
+    }
+    return await saveAyahReflectionById(reflectionId);
+  });
+
+  ipcMain.handle('ayah-history', () => {
+    return getAyahLensState().reflections;
+  });
+
+  ipcMain.handle('ayah-delete-reflection', (_event, reflectionId: string) => {
+    if (typeof reflectionId !== 'string' || !reflectionId.trim()) {
+      return false;
+    }
+    setAyahLensState(deleteReflection(getAyahLensState(), reflectionId));
+    return true;
+  });
+
+  ipcMain.handle('ayah-settings-get', () => {
+    return getAyahLensState().preferences;
+  });
+
+  ipcMain.handle('ayah-settings-update', (_event, key: string, value: unknown) => {
+    try {
+      return updateAyahLensSetting(key, value);
+    } catch {
+      return getAyahLensState().preferences;
+    }
   });
 
   // Get chat history
@@ -2402,6 +3077,10 @@ function setupIPC() {
     await executePetAction({ type: 'move_to_cursor' });
   });
 
+  ipcMain.handle('pet-wake-flight', async () => {
+    await animatePetWindowWakeFlight();
+  });
+
   // Get ClawBot status (returns detailed status)
   ipcMain.handle('clawbot-status', () => {
     if (clawbot) {
@@ -2428,6 +3107,7 @@ function setupIPC() {
       // Also move the chat windows if visible
       updatePetChatPosition();
       updateAssistantPosition();
+      updateScreenshotQuestionPosition();
       updateWorkspaceBrowserPosition();
       petContextMenuWindow?.hide();
       resetInteractionTimer(); // User is interacting
@@ -2435,7 +3115,7 @@ function setupIPC() {
   });
 
   // Show pet chat popup
-  ipcMain.on('show-pet-chat', (_event, message: { id: string; text: string; quickReplies?: string[] }) => {
+  ipcMain.on('show-pet-chat', (_event, message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) => {
     showPetChat(message);
   });
 
@@ -2511,13 +3191,11 @@ function setupIPC() {
   });
 
   ipcMain.handle('onboarding-complete', (_event, data: {
-    workspaceType: 'openclaw' | 'clawster';
-    migrateMemory: boolean;
     launchOnStartup: boolean;
+    aiProvider?: ClawBotProvider;
     gatewayUrl: string;
     gatewayToken: string;
-    identity: string;
-    soul: string;
+    gatewayModel?: string;
     watchFolders: string[];
     watchActiveApp: boolean;
     watchWindowTitles: boolean;
@@ -2532,187 +3210,81 @@ function setupIPC() {
     store.set('tutorial.completedAt', null);
     store.set('tutorial.lastStep', 0);
     store.set('tutorial.wasInterrupted', false);
-    store.set('onboarding.workspaceType', data.workspaceType);
-    if (data.workspaceType === 'openclaw') {
-      store.set('onboarding.clawsterWorkspacePath', null);
-      store.set('onboarding.memoryMigrated', false);
-    }
+    store.set('onboarding.workspaceType', 'clawster');
+    const workspacePath = (store.get('onboarding.clawsterWorkspacePath') as string | null)
+      ?? getDefaultAyahLensWorkspacePath();
+    fs.mkdirSync(workspacePath, { recursive: true });
+    store.set('onboarding.clawsterWorkspacePath', workspacePath);
+    store.set('onboarding.memoryMigrated', false);
+    const provider = normalizeClawBotProvider(data.aiProvider);
+    const model = data.gatewayModel?.trim() || getDefaultClawBotModel(provider);
+    store.set('clawbot.provider', provider);
     store.set('clawbot.url', data.gatewayUrl);
     store.set('clawbot.token', data.gatewayToken);
+    store.set('clawbot.model', model);
     store.set('watch.folders', data.watchFolders);
     store.set('watch.activeApp', data.watchActiveApp);
     store.set('watch.sendWindowTitles', data.watchWindowTitles);
-    store.set('hotkeys.openChat', data.hotkeyOpenChat);
-    store.set('hotkeys.captureScreen', data.hotkeyCaptureScreen);
-    store.set('hotkeys.openAssistant', data.hotkeyOpenAssistant);
+    store.set('hotkeys.openChat', sanitizeAccelerator(data.hotkeyOpenChat, DEFAULT_HOTKEYS.openChat));
+    store.set('hotkeys.captureScreen', sanitizeAccelerator(data.hotkeyCaptureScreen, DEFAULT_HOTKEYS.captureScreen));
+    store.set('hotkeys.openAssistant', sanitizeAccelerator(data.hotkeyOpenAssistant, DEFAULT_HOTKEYS.openAssistant));
     setLaunchOnStartup(data.launchOnStartup);
 
-    // Update ClawBotClient with new config and agentId
-    const newAgentId = data.workspaceType === 'clawster' ? 'clawster' : null;
-    clawbot?.updateConfig(data.gatewayUrl, data.gatewayToken, newAgentId);
+    // Update ClawBotClient with new config
+    clawbot?.updateConfig(data.gatewayUrl, data.gatewayToken, null, { provider, model });
 
     closeOnboardingAndStartApp();
     return true;
   });
 
-  // Read OpenClaw config file
-  ipcMain.handle('read-openclaw-config', () => {
-    const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-    try {
-      if (fs.existsSync(configPath)) {
-        const content = fs.readFileSync(configPath, 'utf-8');
-        return JSON.parse(content);
-      }
-    } catch (error) {
-      console.error('Failed to read OpenClaw config:', error);
-    }
-    return null;
-  });
-
-  // Read OpenClaw workspace files
-  ipcMain.handle('read-openclaw-workspace', () => {
-    const workspacePath = path.join(os.homedir(), '.openclaw', 'workspace');
-    const result: {
-      exists: boolean;
-      identity: string | null;
-      soul: string | null;
-      hasMemory: boolean;
-    } = {
-      exists: false,
-      identity: null,
-      soul: null,
-      hasMemory: false,
-    };
-
-    try {
-      if (fs.existsSync(workspacePath)) {
-        result.exists = true;
-
-        const identityPath = path.join(workspacePath, 'IDENTITY.md');
-        if (fs.existsSync(identityPath)) {
-          result.identity = fs.readFileSync(identityPath, 'utf-8');
-        }
-
-        const soulPath = path.join(workspacePath, 'SOUL.md');
-        if (fs.existsSync(soulPath)) {
-          result.soul = fs.readFileSync(soulPath, 'utf-8');
-        }
-
-        const memoryPath = path.join(workspacePath, 'memory.md');
-        result.hasMemory = fs.existsSync(memoryPath);
-      }
-    } catch (error) {
-      console.error('Failed to read OpenClaw workspace:', error);
-    }
-
-    return result;
-  });
-
-  // Create Clawster workspace
-  ipcMain.handle('create-clawster-workspace', (_event, options: {
-    identity: string;
-    soul: string;
-    migrateMemory: boolean;
-  }) => {
-    const clawsterWorkspace = path.join(os.homedir(), '.openclaw', 'workspace-clawster');
-
-    try {
-      // Create directory
-      fs.mkdirSync(clawsterWorkspace, { recursive: true });
-
-      // Write identity and soul files
-      fs.writeFileSync(path.join(clawsterWorkspace, 'IDENTITY.md'), options.identity);
-      fs.writeFileSync(path.join(clawsterWorkspace, 'SOUL.md'), options.soul);
-
-      // Handle memory migration
-      const destMemory = path.join(clawsterWorkspace, 'memory.md');
-      if (options.migrateMemory) {
-        const sourceMemory = path.join(os.homedir(), '.openclaw', 'workspace', 'memory.md');
-        if (fs.existsSync(sourceMemory)) {
-          fs.copyFileSync(sourceMemory, destMemory);
-          store.set('onboarding.memoryMigrated', true);
-        } else {
-          store.set('onboarding.memoryMigrated', false);
-        }
-      } else {
-        // Starting fresh - delete existing memory if present
-        if (fs.existsSync(destMemory)) {
-          fs.unlinkSync(destMemory);
-        }
-        store.set('onboarding.memoryMigrated', false);
-      }
-
-      store.set('onboarding.clawsterWorkspacePath', clawsterWorkspace);
-      return { success: true, path: clawsterWorkspace };
-    } catch (error) {
-      console.error('Failed to create Clawster workspace:', error);
-      return { success: false, error: String(error) };
-    }
-  });
-
-  // Validate gateway connection by making a real Responses API request
-  ipcMain.handle('validate-gateway', async (_event, url: string, token: string) => {
+  // Validate gateway/provider connection by making a small real AI request.
+  ipcMain.handle('validate-gateway', async (
+    _event,
+    url: string,
+    token: string,
+    providerInput?: ClawBotProvider,
+    modelInput?: string
+  ) => {
+    const provider = normalizeClawBotProvider(providerInput);
+    const model = modelInput?.trim() || getDefaultClawBotModel(provider);
     const makeRequest = async () => {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+      const headers = buildProviderHeaders(url, token, provider);
+      const providerConfig = getAiProviderConfig(provider);
+      if (providerConfig.protocol === 'anthropic-messages') {
+        const normalizedBaseUrl = url.trim().replace(/\/+$/, '');
+        const messagesUrl = normalizedBaseUrl.endsWith('/messages')
+          ? normalizedBaseUrl
+          : `${normalizedBaseUrl}/messages`;
+        return fetch(messagesUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            max_tokens: 5,
+            messages: [{ role: 'user', content: 'hi' }],
+            model,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
       }
 
-      return fetch(`${url}/v1/responses`, {
+      const body: Record<string, unknown> = {
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 5,
+      };
+      if (model) {
+        body.model = model;
+      }
+
+      return fetch(buildChatCompletionsUrl(url, provider), {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          model: 'openclaw',
-          input: 'hi',
-          max_output_tokens: 5,
-        }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(10000),
       });
     };
 
     try {
-      let response = await makeRequest();
-
-      // 405 means the gateway's HTTP responses endpoint is disabled.
-      // Auto-enable it in OpenClaw config and restart the gateway.
-      if (response.status === 405) {
-        console.log('[Gateway] 405 detected — enabling HTTP endpoints');
-        const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-        try {
-          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-          if (!config.gateway) config.gateway = {};
-          if (!config.gateway.http) config.gateway.http = {};
-          if (!config.gateway.http.endpoints) config.gateway.http.endpoints = {};
-          if (!config.gateway.http.endpoints.chatCompletions) config.gateway.http.endpoints.chatCompletions = {};
-          if (!config.gateway.http.endpoints.responses) config.gateway.http.endpoints.responses = {};
-          config.gateway.http.endpoints.chatCompletions.enabled = true;
-          config.gateway.http.endpoints.responses.enabled = true;
-          fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-
-          // Reinstall and restart the gateway to ensure endpoint config is applied
-          await execAsync('openclaw gateway stop', { timeout: 10000 }).catch(() => {});
-          await execAsync('openclaw gateway install --force', { timeout: 10000 });
-          await execAsync('openclaw gateway start', { timeout: 10000 });
-
-          // Wait for gateway to come back up before retrying
-          for (let i = 0; i < 10; i++) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            try {
-              const health = await fetch(`${url}/health`, { signal: AbortSignal.timeout(2000) });
-              if (health.ok || health.status === 200) break;
-            } catch {
-              // Gateway may still be starting; keep retrying
-            }
-          }
-
-          response = await makeRequest();
-        } catch (configError) {
-          console.error('[Gateway] Failed to auto-enable responses endpoint:', configError);
-          return { success: false, error: '405: HTTP responses endpoint disabled. Add gateway.http.endpoints.responses.enabled=true to ~/.openclaw/openclaw.json' };
-        }
-      }
+      const response = await makeRequest();
 
       if (response.ok) {
         return { success: true };
@@ -2723,43 +3295,12 @@ function setupIPC() {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg.includes('fetch failed') || msg.includes('ECONNREFUSED')) {
-        return { success: false, error: 'Gateway not reachable — is it running?' };
+        return { success: false, error: 'AI provider not reachable. Check the base URL and API key.' };
       }
       if (msg.includes('timed out') || msg.includes('AbortError')) {
-        return { success: false, error: 'Connection timed out — gateway may be slow or unreachable' };
+        return { success: false, error: 'Connection timed out. The AI provider may be slow or unreachable.' };
       }
       return { success: false, error: msg };
-    }
-  });
-
-  // Get default identity and soul from app resources
-  ipcMain.handle('get-default-personality', () => {
-    try {
-      // In development, read from openclaw folder relative to project
-      // In production, read from resources
-      const basePath = isDev
-        ? path.join(__dirname, '../../openclaw')
-        : path.join(process.resourcesPath, 'openclaw');
-
-      const identity = fs.readFileSync(path.join(basePath, 'IDENTITY.md'), 'utf-8');
-      const soul = fs.readFileSync(path.join(basePath, 'SOUL.md'), 'utf-8');
-
-      return { identity, soul };
-    } catch (error) {
-      console.error('Failed to read default personality:', error);
-      return { identity: '', soul: '' };
-    }
-  });
-
-  // Save personality files to workspace
-  ipcMain.handle('save-personality', (_event, workspacePath: string, identity: string, soul: string) => {
-    try {
-      fs.writeFileSync(path.join(workspacePath, 'IDENTITY.md'), identity);
-      fs.writeFileSync(path.join(workspacePath, 'SOUL.md'), soul);
-      return { success: true };
-    } catch (error) {
-      console.error('Failed to save personality:', error);
-      return { success: false, error: String(error) };
     }
   });
 
@@ -2809,23 +3350,32 @@ function setupIPC() {
   });
 }
 
+function normalizeSettingsValue(key: string, value: unknown): unknown {
+  switch (key) {
+    case 'hotkeys.openChat':
+      return sanitizeAccelerator(value, DEFAULT_HOTKEYS.openChat);
+    case 'hotkeys.captureScreen':
+      return sanitizeAccelerator(value, DEFAULT_HOTKEYS.captureScreen);
+    case 'hotkeys.openAssistant':
+      return sanitizeAccelerator(value, DEFAULT_HOTKEYS.openAssistant);
+    default:
+      return value;
+  }
+}
+
 // Register global hotkeys from store
 function registerHotkeys() {
   // Unregister all first (in case we're re-registering)
   globalShortcut.unregisterAll();
 
-  const hotkeyOpenAssistant = store.get('hotkeys.openAssistant') as string || 'CommandOrControl+Shift+A';
-  const hotkeyOpenChat = store.get('hotkeys.openChat') as string || 'CommandOrControl+Shift+Space';
-  const hotkeyCaptureScreen = store.get('hotkeys.captureScreen') as string || 'CommandOrControl+Shift+/';
-
-  globalShortcut.register(hotkeyOpenAssistant, () => {
+  const hotkeyOpenAssistant = registerConfiguredHotkey('hotkeys.openAssistant', DEFAULT_HOTKEYS.openAssistant, () => {
     // Notify tutorial if active
     tutorialManager.handleHotkeyPressed('openAssistant');
     toggleAssistantWindow();
   });
   console.log(`[Hotkeys] Registered open assistant: ${hotkeyOpenAssistant}`);
 
-  globalShortcut.register(hotkeyOpenChat, () => {
+  const hotkeyOpenChat = registerConfiguredHotkey('hotkeys.openChat', DEFAULT_HOTKEYS.openChat, () => {
     // Notify tutorial if active
     tutorialManager.handleHotkeyPressed('openChat');
     resetInteractionTimer();
@@ -2833,11 +3383,41 @@ function registerHotkeys() {
   });
   console.log(`[Hotkeys] Registered open chat: ${hotkeyOpenChat}`);
 
-  globalShortcut.register(hotkeyCaptureScreen, () => {
+  const hotkeyCaptureScreen = registerConfiguredHotkey('hotkeys.captureScreen', DEFAULT_HOTKEYS.captureScreen, () => {
     console.log('[ScreenshotQuestion] Hotkey triggered');
     toggleScreenshotQuestionWindow();
   });
   console.log(`[Hotkeys] Registered capture screen: ${hotkeyCaptureScreen}`);
+}
+
+function registerConfiguredHotkey(key: string, fallback: string, callback: () => void): string {
+  const storedAccelerator = store.get(key) as string | undefined;
+  const accelerator = sanitizeAccelerator(storedAccelerator, fallback);
+
+  if (accelerator !== storedAccelerator) {
+    store.set(key, accelerator);
+  }
+
+  try {
+    const didRegister = globalShortcut.register(accelerator, callback);
+    if (didRegister) {
+      return accelerator;
+    }
+  } catch (error) {
+    console.warn(`[Hotkeys] Failed to register ${key}: ${accelerator}`, error);
+  }
+
+  if (accelerator !== fallback) {
+    store.set(key, fallback);
+    try {
+      globalShortcut.register(fallback, callback);
+    } catch (error) {
+      console.warn(`[Hotkeys] Failed to register fallback for ${key}: ${fallback}`, error);
+    }
+    return fallback;
+  }
+
+  return accelerator;
 }
 
 // Auto-updater setup
@@ -2871,7 +3451,7 @@ function setupAutoUpdater() {
     dialog.showMessageBox({
       type: 'info',
       title: 'Update Ready',
-      message: `Clawster ${info.version} is ready to install.`,
+      message: `Ayati - Quran Desktop Companion ${info.version} is ready to install.`,
       detail: 'The update will be installed when you restart the app.',
       buttons: ['Restart Now', 'Later'],
     }).then((result) => {
@@ -2891,30 +3471,17 @@ function setupAutoUpdater() {
 
 // Setup system tray
 function setupTray() {
-  // Create tray icon - use dedicated tray icon (black silhouette for template)
-  const iconPath = isDev
-    ? path.join(__dirname, '../../assets/tray-icon.png')
-    : path.join(process.resourcesPath, 'assets/tray-icon.png');
-
-  let trayIcon: Electron.NativeImage;
-
-  try {
-    trayIcon = nativeImage.createFromPath(iconPath);
-    if (process.platform === 'darwin') {
-      // Template images adapt to light/dark menu bar automatically
-      trayIcon.setTemplateImage(true);
-    }
-  } catch {
-    // Fallback: create a simple colored icon
-    trayIcon = nativeImage.createEmpty();
-  }
+  const appIcon = createAppIconImage();
+  const trayIcon = appIcon.isEmpty()
+    ? nativeImage.createEmpty()
+    : appIcon.resize({ width: 16, height: 16 });
 
   tray = new Tray(trayIcon);
-  tray.setToolTip('Clawster');
+  tray.setToolTip('Ayati - Quran Desktop Companion');
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Show Clawster',
+      label: 'Show Ayati - Quran Desktop Companion',
       click: () => {
         petWindow?.show();
         petWindow?.focus();
@@ -2955,14 +3522,14 @@ function setupTray() {
         dialog.showMessageBox({
           type: 'info',
           title: 'Onboarding Reset',
-          message: 'Onboarding has been reset. Restart Clawster to see the onboarding wizard.',
+          message: 'Onboarding has been reset. Restart Ayati - Quran Desktop Companion to see the onboarding wizard.',
           buttons: ['OK'],
         });
       },
     },
     { type: 'separator' },
     {
-      label: 'Quit Clawster',
+      label: 'Quit Ayati - Quran Desktop Companion',
       click: () => {
         app.quit();
       },
@@ -2981,44 +3548,27 @@ function setupTray() {
   }
 }
 
-// Ensure gateway.http.endpoints are enabled in OpenClaw config.
-// Many users are missing this block, which prevents Clawster from connecting.
-function ensureGatewayHttpEndpoints(): void {
-  const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-  try {
-    if (!fs.existsSync(configPath)) return;
-
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    if (!config.gateway) return; // No gateway config at all — nothing to patch
-
-    const endpoints = config.gateway.http?.endpoints;
-    const needsChatCompletions = !endpoints?.chatCompletions?.enabled;
-    const needsResponses = !endpoints?.responses?.enabled;
-
-    if (!needsChatCompletions && !needsResponses) return; // Already configured
-
-    console.log('[Gateway] HTTP endpoints missing — auto-injecting into openclaw.json');
-    if (!config.gateway.http) config.gateway.http = {};
-    if (!config.gateway.http.endpoints) config.gateway.http.endpoints = {};
-    if (!config.gateway.http.endpoints.chatCompletions) config.gateway.http.endpoints.chatCompletions = {};
-    if (!config.gateway.http.endpoints.responses) config.gateway.http.endpoints.responses = {};
-    config.gateway.http.endpoints.chatCompletions.enabled = true;
-    config.gateway.http.endpoints.responses.enabled = true;
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    console.log('[Gateway] HTTP endpoints injected into openclaw.json');
-  } catch (error) {
-    console.error('[Gateway] Failed to ensure HTTP endpoints:', error);
+// App lifecycle
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('ayati', process.execPath, [path.resolve(process.argv[1])]);
   }
+} else {
+  app.setAsDefaultProtocolClient('ayati');
 }
 
-// App lifecycle
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  if (!url.startsWith('ayati://oauth/callback')) return;
+  const targetWindow = assistantWindow && !assistantWindow.isDestroyed() ? assistantWindow : null;
+  targetWindow?.webContents.send('ayah-oauth-callback', url);
+});
+
 app.whenReady().then(async () => {
+  applyDockIcon();
   setupIPC();
   setupAutoUpdater();
   setupTray();
-
-  // Ensure HTTP endpoints are configured before any UI loads
-  ensureGatewayHttpEndpoints();
 
   // Check onboarding status
   const onboardingCompleted = store.get('onboarding.completed') as boolean;

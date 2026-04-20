@@ -114,7 +114,7 @@ function getFilePresentation(name: string): { icon: string; tone: WorkspaceFileT
 }
 
 function getWorkspaceTitle(workspaceType: CurrentWorkspaceInfo['workspaceType']): string {
-  if (workspaceType === 'openclaw' || workspaceType === 'clawster') return 'OpenClaw Workspace';
+  if (workspaceType === 'clawster') return 'Ayati - Quran Desktop Companion Workspace';
   return 'Workspace';
 }
 
@@ -528,7 +528,7 @@ export const WorkspaceBrowser: React.FC = () => {
             <div className="workspace-state">
               <Icon icon="solar:folder-error-linear" width="28" height="28" />
               <h2>Workspace unavailable</h2>
-              <p>{workspaceInfo?.workspacePath ? 'The configured workspace directory does not exist.' : 'Finish onboarding to choose an OpenClaw or Clawster workspace.'}</p>
+              <p>{workspaceInfo?.workspacePath ? 'The configured workspace directory does not exist.' : 'Finish onboarding to create an Ayati - Quran Desktop Companion workspace.'}</p>
             </div>
           ) : directoryError ? (
             <div className="workspace-state">
