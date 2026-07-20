@@ -72,6 +72,13 @@ interface AyahReflection {
   alternateGroupId?: string;
   sourceCandidateIndex?: number;
   rankedCandidateVerseKeys?: string[];
+  footnotes?: Footnote[];
+}
+
+interface Footnote {
+  id: number;
+  number: number;
+  text: string;
 }
 
 interface QuranTafsirSnippet {
@@ -194,9 +201,22 @@ interface PrayerTimeEntry {
   time: string;
   at: number;
   isReminderEnabled: boolean;
+  iqamahTime?: string;
+}
+interface MasjidlyMosqueSummary {
+  slug: string;
+  name: string;
+  cityName: string;
+  countryName: string;
+  timezone: string;
 }
 interface PrayerSettings {
   enabled: boolean;
+  source: 'calculation' | 'masjidly';
+  mosqueSlug: string;
+  showIqamah: boolean;
+  calculationCity: string;
+  calculationCountry: string;
   city: string;
   country: string;
   method: number;
@@ -204,6 +224,7 @@ interface PrayerSettings {
   reminderLeadMinutes: number;
   quietMinutesAfterPrayer: number;
   hasSavedSettings: boolean;
+  use24h: boolean;
 }
 interface PrayerDay {
   date: string;
@@ -212,7 +233,9 @@ interface PrayerDay {
   method: number;
   school: 0 | 1;
   timezone: string;
-  source: 'aladhan';
+  source: 'aladhan' | 'masjidly';
+  mosqueSlug?: string;
+  mosqueName?: string;
   fetchedAt: number;
   prayers: PrayerTimeEntry[];
   error?: string;
@@ -458,6 +481,7 @@ interface AyatiAPI {
   readQulFontFile: (fontAbsolutePath: string) => Promise<Uint8Array | null>;
   getPrayerSettings: () => Promise<PrayerSettings>;
   updatePrayerSettings: (patch: Partial<PrayerSettings>) => Promise<PrayerSettings>;
+  listMasjidlyMosques: () => Promise<MasjidlyMosqueSummary[]>;
   getPrayerTimes: () => Promise<PrayerTimesBundle | null>;
   refreshPrayerTimes: () => Promise<PrayerTimesBundle | null>;
   getTodos: () => Promise<TodoItem[]>;

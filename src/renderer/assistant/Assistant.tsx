@@ -12,7 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
-import { getTafsirParagraphs } from '../screenshot-question/AyahVerseCard';
+import { getTafsirParagraphs, TranslationWithFootnotes } from '../screenshot-question/AyahVerseCard';
 import { QulArabicText } from '../components/QulArabicText';
 import { HotkeyInput } from '../components/HotkeyInput';
 import { SettingsSection } from '../components/SettingsSection';
@@ -33,6 +33,8 @@ import { KEYCHAIN_CONSENT_LEDE } from '../../shared/keychain-consent';
 
 type Tab = 'prayers' | 'todos' | 'focus' | 'reflections' | 'settings';
 type UpdateAction = 'check' | 'download' | 'install';
+type MasjidlyMosque = MasjidlyMosqueSummary;
+type MasjidlyDirectoryStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 /** Legacy timed-reminder copy; hidden in the reflections list. */
 const LEGACY_TIMED_REMINDER_WHY = 'This reminder was shown on the interval you set.';
@@ -109,6 +111,11 @@ function formatTodoDate(value: unknown): string | null {
 
 const DEFAULT_PRAYER_DRAFT: PrayerSettings = {
   enabled: false,
+  source: 'calculation',
+  mosqueSlug: '',
+  showIqamah: false,
+  calculationCity: '',
+  calculationCountry: '',
   city: '',
   country: '',
   method: 15,
@@ -120,7 +127,7 @@ const DEFAULT_PRAYER_DRAFT: PrayerSettings = {
 };
 
 function formatPrayerTime(time: string, use24h: boolean): string {
-  if (use24h) return time;
+  if (!/^\d{2}:\d{2}$/.test(time) || use24h) return time;
   const [h, m] = time.split(':').map(Number);
   const period = h >= 12 ? 'PM' : 'AM';
   const hour = h % 12 || 12;
@@ -175,7 +182,7 @@ const PRAYER_JURISTIC_SCHOOLS = [
 ] as const;
 
 function getPrayerCountryOptions(currentCountry: string): string[] {
-  const countries = PRAYER_LOCATION_PRESETS.map((preset) => preset.country);
+  const countries = PRAYER_LOCATION_PRESETS.map((preset) => preset.country as string);
   return currentCountry && !countries.includes(currentCountry)
     ? [currentCountry, ...countries]
     : countries;
@@ -183,7 +190,7 @@ function getPrayerCountryOptions(currentCountry: string): string[] {
 
 function getPrayerCityOptions(country: string, currentCity: string): string[] {
   const preset = PRAYER_LOCATION_PRESETS.find((entry) => entry.country === country);
-  const cities = preset?.cities ? [...preset.cities] : [];
+  const cities = preset?.cities ? [...preset.cities] as string[] : [];
   return currentCity && !cities.includes(currentCity)
     ? [currentCity, ...cities]
     : cities;
@@ -301,6 +308,8 @@ export const Assistant: React.FC = () => {
   const [prayerDay, setPrayerDay] = useState<PrayerDay | null>(null);
   const [prayerTomorrow, setPrayerTomorrow] = useState<PrayerDay | null>(null);
   const [prayerDraft, setPrayerDraft] = useState<PrayerSettings | null>(null);
+  const [masjidlyMosques, setMasjidlyMosques] = useState<MasjidlyMosque[]>([]);
+  const [masjidlyDirectoryStatus, setMasjidlyDirectoryStatus] = useState<MasjidlyDirectoryStatus>('idle');
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [todoTitle, setTodoTitle] = useState('');
   const [todoNotes, setTodoNotes] = useState('');
@@ -682,12 +691,31 @@ export const Assistant: React.FC = () => {
     applyPrayerTimesPayload(bundle, setPrayerDay, setPrayerTomorrow);
   }, [prayerDraft]);
 
+  const loadMasjidlyDirectory = useCallback(async () => {
+    setMasjidlyDirectoryStatus('loading');
+    try {
+      const mosques = await window.ayati.listMasjidlyMosques();
+      setMasjidlyMosques(mosques);
+      setMasjidlyDirectoryStatus('ready');
+    } catch {
+      setMasjidlyMosques([]);
+      setMasjidlyDirectoryStatus('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    const source = prayerDraft?.source ?? prayerSettings?.source;
+    if (source !== 'masjidly') return;
+    if (masjidlyDirectoryStatus !== 'idle') return;
+    void loadMasjidlyDirectory();
+  }, [loadMasjidlyDirectory, masjidlyDirectoryStatus, prayerDraft?.source, prayerSettings?.source]);
+
   const updatePrayerSettingsFromSettings = useCallback(async (patch: Partial<PrayerSettings>) => {
     const nextSettings = await window.ayati.updatePrayerSettings(patch);
     setPrayerSettings(nextSettings);
     setPrayerDraft(nextSettings);
     const affectsPrayerSchedule =
-      ('method' in patch || 'school' in patch || 'city' in patch || 'country' in patch);
+      ('source' in patch || 'mosqueSlug' in patch || 'method' in patch || 'school' in patch || 'city' in patch || 'country' in patch);
     if (affectsPrayerSchedule) {
       const bundle = await window.ayati.refreshPrayerTimes().catch(() => null);
       applyPrayerTimesPayload(bundle, setPrayerDay, setPrayerTomorrow);
@@ -695,7 +723,7 @@ export const Assistant: React.FC = () => {
   }, []);
 
   /** Saves calculation fields to the main process and refreshes displayed times without replacing unsaved draft fields (city/country until Save). */
-  const persistPrayerCalculationFromDraft = useCallback((partial: Pick<PrayerSettings, 'method' | 'school'>) => {
+  const persistPrayerCalculationFromDraft = useCallback((partial: Partial<Pick<PrayerSettings, 'method' | 'school'>>) => {
     void (async () => {
       const nextSettings = await window.ayati.updatePrayerSettings(partial);
       setPrayerSettings(nextSettings);
@@ -885,6 +913,13 @@ export const Assistant: React.FC = () => {
   const currentPrayerDraft = prayerDraft ?? prayerSettings ?? DEFAULT_PRAYER_DRAFT;
   const prayerCountryOptions = getPrayerCountryOptions(currentPrayerDraft.country);
   const prayerCityOptions = getPrayerCityOptions(currentPrayerDraft.country, currentPrayerDraft.city);
+  const masjidlyCountryOptions = [...new Set(masjidlyMosques.map((mosque) => mosque.countryName))].sort();
+  const masjidlyCityOptions = [...new Set(masjidlyMosques
+    .filter((mosque) => mosque.countryName === currentPrayerDraft.country)
+    .map((mosque) => mosque.cityName))].sort();
+  const masjidlyMosqueOptions = masjidlyMosques.filter((mosque) => (
+    mosque.countryName === currentPrayerDraft.country && mosque.cityName === currentPrayerDraft.city
+  ));
   const incompleteTodos = todos.filter((todo) => !todo.completedAt);
   const completedTodos = todos.filter((todo) => todo.completedAt);
   void pomodoroUiTick;
@@ -979,13 +1014,53 @@ export const Assistant: React.FC = () => {
               <div className="space-y-4">
                 <h3 className="text-xs font-medium text-neutral-300 uppercase tracking-widest">Prayer Setup</h3>
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2 space-y-1.5">
+                    <span className="block text-xs text-neutral-500">Prayer time source</span>
+                    <Select
+                      value={currentPrayerDraft.source}
+                      onValueChange={(source: 'calculation' | 'masjidly') => setPrayerDraft((current) => {
+                        const base = current ?? currentPrayerDraft;
+                        if (source === 'masjidly') {
+                          return {
+                            ...base,
+                            source,
+                            calculationCity: base.city || base.calculationCity,
+                            calculationCountry: base.country || base.calculationCountry,
+                            country: '',
+                            city: '',
+                          };
+                        }
+                        return {
+                          ...base,
+                          source,
+                          city: base.calculationCity || base.city,
+                          country: base.calculationCountry || base.country,
+                        };
+                      })}
+                    >
+                      <SelectTrigger aria-label="Prayer time source" className="w-full border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground focus-visible:ring-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                        <SelectItem value="calculation">Calculated times</SelectItem>
+                        <SelectItem value="masjidly">Masjidly mosque timetable</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {currentPrayerDraft.source === 'calculation' ? <>
                   <div className="space-y-1.5">
                     <span className="block text-xs text-neutral-500">Country</span>
                     <Select
                       value={currentPrayerDraft.country}
                       onValueChange={(country) => {
                         const firstCity = PRAYER_LOCATION_PRESETS.find((preset) => preset.country === country)?.cities[0] ?? '';
-                        setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), country, city: firstCity }));
+                        setPrayerDraft((current) => ({
+                          ...(current ?? currentPrayerDraft),
+                          country,
+                          city: firstCity,
+                          calculationCountry: country,
+                          calculationCity: firstCity,
+                        }));
                       }}
                     >
                       <SelectTrigger aria-label="Prayer country" className="w-full border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0">
@@ -1002,7 +1077,11 @@ export const Assistant: React.FC = () => {
                     <span className="block text-xs text-neutral-500">City</span>
                     <Select
                       value={currentPrayerDraft.city}
-                      onValueChange={(city) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), city }))}
+                      onValueChange={(city) => setPrayerDraft((current) => ({
+                        ...(current ?? currentPrayerDraft),
+                        city,
+                        calculationCity: city,
+                      }))}
                     >
                       <SelectTrigger aria-label="Prayer city" className="w-full border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0">
                         <SelectValue placeholder="Select city" />
@@ -1014,6 +1093,67 @@ export const Assistant: React.FC = () => {
                       </SelectContent>
                     </Select>
                   </div>
+                  </> : <>
+                  {masjidlyDirectoryStatus === 'error' && (
+                    <div className="col-span-2 flex items-center justify-between gap-3 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+                      <p className="text-xs text-amber-200">Could not load Masjidly mosques.</p>
+                      <Button type="button" size="sm" variant="outline" onClick={() => void loadMasjidlyDirectory()}>
+                        Retry
+                      </Button>
+                    </div>
+                  )}
+                  <div className="space-y-1.5">
+                    <span className="block text-xs text-neutral-500">Country</span>
+                    <Select
+                      value={currentPrayerDraft.country}
+                      onValueChange={(country) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), country, city: '', mosqueSlug: '' }))}
+                      disabled={masjidlyDirectoryStatus !== 'ready'}
+                    >
+                      <SelectTrigger aria-label="Masjidly country" className="w-full border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground focus-visible:ring-0">
+                        <SelectValue placeholder={
+                          masjidlyDirectoryStatus === 'loading' ? 'Loading countries…'
+                            : masjidlyDirectoryStatus === 'error' ? 'Failed to load countries'
+                              : 'Select country'
+                        } />
+                      </SelectTrigger>
+                      <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                        {masjidlyCountryOptions.map((country) => <SelectItem key={country} value={country}>{country}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="block text-xs text-neutral-500">City</span>
+                    <Select
+                      value={currentPrayerDraft.city}
+                      onValueChange={(city) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), city, mosqueSlug: '' }))}
+                      disabled={!currentPrayerDraft.country}
+                    >
+                      <SelectTrigger aria-label="Masjidly city" className="w-full border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground focus-visible:ring-0">
+                        <SelectValue placeholder="Select city" />
+                      </SelectTrigger>
+                      <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                        {masjidlyCityOptions.map((city) => <SelectItem key={city} value={city}>{city}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="col-span-2 space-y-1.5">
+                    <span className="block text-xs text-neutral-500">Mosque</span>
+                    <Select
+                      value={currentPrayerDraft.mosqueSlug}
+                      onValueChange={(mosqueSlug) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), mosqueSlug }))}
+                      disabled={!currentPrayerDraft.city}
+                    >
+                      <SelectTrigger aria-label="Masjidly mosque" className="w-full border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground focus-visible:ring-0">
+                        <SelectValue placeholder="Select mosque" />
+                      </SelectTrigger>
+                      <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                        {masjidlyMosqueOptions.map((mosque) => (
+                          <SelectItem key={mosque.slug} value={mosque.slug}>{mosque.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  </>}
                   <div className="flex items-center justify-between gap-3 pt-2">
                     <span className="text-sm text-neutral-300">Prayer Awareness</span>
                     <Switch
@@ -1034,6 +1174,7 @@ export const Assistant: React.FC = () => {
                       className="border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
                     />
                   </div>
+                  {currentPrayerDraft.source === 'calculation' && <>
                   <div className="space-y-1.5">
                     <span className="block text-xs text-neutral-500">Calculation</span>
                     <Select
@@ -1075,6 +1216,17 @@ export const Assistant: React.FC = () => {
                       </SelectContent>
                     </Select>
                   </div>
+                  </>}
+                  {currentPrayerDraft.source === 'masjidly' && (
+                    <div className="col-span-2 flex items-center justify-between gap-3 pt-2">
+                      <span className="text-sm text-neutral-300">Show iqamah times</span>
+                      <Switch
+                        aria-label="Show iqamah times"
+                        checked={currentPrayerDraft.showIqamah}
+                        onCheckedChange={(showIqamah) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), showIqamah }))}
+                      />
+                    </div>
+                  )}
                 </div>
                 <Button
                   type="button"
@@ -1108,14 +1260,36 @@ export const Assistant: React.FC = () => {
                 {prayerDay?.error && <p className="text-xs text-amber-300">{prayerDay.error}</p>}
               </div>
 
-              <div className="flex min-h-0 flex-1 flex-col border-t border-neutral-900 pt-1">
+              <div
+                className="flex min-h-0 flex-1 flex-col border-t border-neutral-900 pt-1"
+                role={prayerSettings?.showIqamah ? 'table' : 'list'}
+                aria-label={prayerSettings?.showIqamah ? 'Prayer and iqamah times' : 'Prayer times'}
+              >
+                {prayerSettings?.showIqamah && (
+                  <div className="grid grid-cols-[1fr_4.5rem_4.5rem] gap-3 border-b border-neutral-900 py-1 text-[10px] uppercase tracking-wider text-neutral-600" role="row">
+                    <span role="columnheader">Prayer</span>
+                    <span className="text-right" role="columnheader">Adhan</span>
+                    <span className="text-right" role="columnheader">Iqamah</span>
+                  </div>
+                )}
                 {(prayerDay?.prayers ?? []).map((prayer) => (
                   <div
                     key={prayer.name}
-                    className="flex flex-1 items-center justify-between border-b border-neutral-900 last:border-0"
+                    className={cn(
+                      'grid flex-1 items-center gap-3 border-b border-neutral-900 last:border-0',
+                      prayerSettings?.showIqamah ? 'grid-cols-[1fr_4.5rem_4.5rem]' : 'grid-cols-[1fr_4.5rem]',
+                    )}
+                    role={prayerSettings?.showIqamah ? 'row' : 'listitem'}
                   >
-                    <span className="text-sm text-foreground">{prayer.label}</span>
-                    <span className="text-sm text-[#67E0A3] tabular-nums">{formatPrayerTime(prayer.time, prayerSettings?.use24h ?? true)}</span>
+                    <span className="text-sm text-foreground" role={prayerSettings?.showIqamah ? 'cell' : undefined}>{prayer.label}</span>
+                    <span className="text-right text-sm text-[#67E0A3] tabular-nums" role={prayerSettings?.showIqamah ? 'cell' : undefined}>
+                      {formatPrayerTime(prayer.time, prayerSettings?.use24h ?? true)}
+                    </span>
+                    {prayerSettings?.showIqamah && (
+                      <span className="text-right text-sm text-neutral-400 tabular-nums" role="cell">
+                        {prayer.iqamahTime ? formatPrayerTime(prayer.iqamahTime, prayerSettings.use24h) : '—'}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1420,7 +1594,10 @@ export const Assistant: React.FC = () => {
                   />
 
                   <p translate="no" className="text-sm leading-relaxed text-neutral-200">
-                    {reflection.translation}
+                    <TranslationWithFootnotes
+                      text={reflection.translation}
+                      footnotes={reflection.footnotes}
+                    />
                   </p>
 
                   {reflection.whyThisVerse
@@ -1638,6 +1815,22 @@ export const Assistant: React.FC = () => {
                 />
               </label>
               <div className="grid grid-cols-2 gap-3">
+                <label className="col-span-2 block">
+                  <span className="block text-[11px] text-neutral-600 mb-1">Source</span>
+                  <Select
+                    value={currentPrayerDraft.source}
+                    onValueChange={(source: 'calculation' | 'masjidly') => updatePrayerSettingsFromSettings({ source })}
+                  >
+                    <SelectTrigger aria-label="Prayer time source" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                      <SelectItem value="calculation">Calculated times</SelectItem>
+                      <SelectItem value="masjidly">Masjidly mosque timetable</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
+                {currentPrayerDraft.source === 'calculation' ? <>
                 <label className="block">
                   <span className="block text-[11px] text-neutral-600 mb-1">Country</span>
                   <Select
@@ -1673,6 +1866,67 @@ export const Assistant: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </label>
+                </> : <>
+                {masjidlyDirectoryStatus === 'error' && (
+                  <div className="col-span-2 flex items-center justify-between gap-3">
+                    <p className="text-[11px] text-amber-200">Could not load Masjidly mosques.</p>
+                    <Button type="button" size="sm" variant="outline" onClick={() => void loadMasjidlyDirectory()}>
+                      Retry
+                    </Button>
+                  </div>
+                )}
+                <label className="block">
+                  <span className="block text-[11px] text-neutral-600 mb-1">Country</span>
+                  <Select
+                    value={currentPrayerDraft.country}
+                    onValueChange={(country) => updatePrayerSettingsFromSettings({ country, city: '', mosqueSlug: '' })}
+                    disabled={masjidlyDirectoryStatus !== 'ready'}
+                  >
+                    <SelectTrigger aria-label="Masjidly country" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0">
+                      <SelectValue placeholder={
+                        masjidlyDirectoryStatus === 'loading' ? 'Loading countries…'
+                          : masjidlyDirectoryStatus === 'error' ? 'Failed to load countries'
+                            : 'Select country'
+                      } />
+                    </SelectTrigger>
+                    <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                      {masjidlyCountryOptions.map((country) => <SelectItem key={country} value={country}>{country}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </label>
+                <label className="block">
+                  <span className="block text-[11px] text-neutral-600 mb-1">City</span>
+                  <Select
+                    value={currentPrayerDraft.city}
+                    onValueChange={(city) => updatePrayerSettingsFromSettings({ city, mosqueSlug: '' })}
+                    disabled={!currentPrayerDraft.country}
+                  >
+                    <SelectTrigger aria-label="Masjidly city" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0">
+                      <SelectValue placeholder="Select city" />
+                    </SelectTrigger>
+                    <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                      {masjidlyCityOptions.map((city) => <SelectItem key={city} value={city}>{city}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </label>
+                <label className="col-span-2 block">
+                  <span className="block text-[11px] text-neutral-600 mb-1">Mosque</span>
+                  <Select
+                    value={currentPrayerDraft.mosqueSlug}
+                    onValueChange={(mosqueSlug) => updatePrayerSettingsFromSettings({ mosqueSlug })}
+                    disabled={!currentPrayerDraft.city}
+                  >
+                    <SelectTrigger aria-label="Masjidly mosque" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0">
+                      <SelectValue placeholder="Select mosque" />
+                    </SelectTrigger>
+                    <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                      {masjidlyMosqueOptions.map((mosque) => (
+                        <SelectItem key={mosque.slug} value={mosque.slug}>{mosque.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+                </>}
                 <label className="block">
                   <span className="block text-[11px] text-neutral-600 mb-1">Lead</span>
                   <Input
@@ -1684,7 +1938,7 @@ export const Assistant: React.FC = () => {
                     className="border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1 h-auto text-sm placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
                   />
                 </label>
-                <label className="block">
+                {currentPrayerDraft.source === 'calculation' ? <label className="block">
                   <span className="block text-[11px] text-neutral-600 mb-1">Method</span>
                   <Select
                     value={String(currentPrayerDraft.method)}
@@ -1699,7 +1953,14 @@ export const Assistant: React.FC = () => {
                       ))}
                     </SelectContent>
                   </Select>
-                </label>
+                </label> : <label className="flex items-center justify-between gap-3">
+                  <span className="text-sm">Show iqamah times</span>
+                  <Switch
+                    aria-label="Show iqamah times"
+                    checked={currentPrayerDraft.showIqamah}
+                    onCheckedChange={(showIqamah) => updatePrayerSettingsFromSettings({ showIqamah })}
+                  />
+                </label>}
               </div>
             </div>
           </SettingsSection>

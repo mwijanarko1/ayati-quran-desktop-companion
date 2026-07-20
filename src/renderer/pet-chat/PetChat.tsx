@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
 import { MarkdownMessage } from '../components/MarkdownMessage';
 import { QulArabicText } from '../components/QulArabicText';
-import { getTafsirParagraphs } from '../screenshot-question/AyahVerseCard';
+import { getTafsirParagraphs, TranslationWithFootnotes } from '../screenshot-question/AyahVerseCard';
 
 const MIN_REFLECTION_NOTE_CHARS = 6;
 
@@ -442,7 +442,9 @@ export const PetChat: React.FC = () => {
                     )
                   ) : null}
                   {message.footerText ? (
-                    <p className="pet-chat-translation">{message.footerText}</p>
+                    <p className="pet-chat-translation">
+                      <TranslationWithFootnotes text={message.footerText} />
+                    </p>
                   ) : null}
                   {tafsir ? (
                     <section

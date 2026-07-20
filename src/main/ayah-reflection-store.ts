@@ -56,6 +56,11 @@ export function createDefaultAyahLensState(): AyahLensState {
     prayer: {
       settings: {
         enabled: false,
+        source: 'calculation',
+        mosqueSlug: '',
+        showIqamah: false,
+        calculationCity: '',
+        calculationCountry: '',
         city: '',
         country: '',
         method: 15,

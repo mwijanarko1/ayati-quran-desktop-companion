@@ -233,60 +233,6 @@ h2 {
   line-height: 1.55;
 }
 
-/* Translation text with footnote markers */
-.ayah-translation-text {
-  display: inline;
-}
-
-/* Inline footnote popover */
-.ayah-footnote-popover {
-  display: block;
-  margin: 6px 0 8px 4px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border-left: 2px solid rgba(103, 224, 163, 0.35);
-  border-radius: 4px;
-  color: #a3a3a3;
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.ayah-footnote-number {
-  font-weight: 600;
-  color: var(--accent);
-  margin-right: 3px;
-}
-
-.ayah-footnote-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 3px;
-  margin: 0 1px;
-  background: rgba(103, 224, 163, 0.12);
-  border: 1px solid rgba(103, 224, 163, 0.2);
-  border-radius: 3px;
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1;
-  cursor: pointer;
-  vertical-align: super;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.ayah-footnote-badge:hover {
-  background: rgba(103, 224, 163, 0.25);
-  border-color: rgba(103, 224, 163, 0.45);
-}
-
-.ayah-footnote-badge--open {
-  background: rgba(103, 224, 163, 0.3);
-  border-color: var(--accent);
-}
-
 .ayah-reflection-copy {
   display: grid;
   gap: 8px;

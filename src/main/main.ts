@@ -124,9 +124,10 @@ import {
   selectUpdateFromMetadata,
   type SelectedUpdateMetadata,
 } from './update-metadata';
-import { fetchPrayerTimesByCity } from './prayer-times-client';
+import { fetchMasjidlyPrayerTimes, fetchPrayerTimesByCity, listMasjidlyMosques } from './prayer-times-client';
 import {
   isInsidePrayerQuietWindow,
+  mergePrayerSettings,
   shouldRefreshPrayerDay,
   shouldSendPrayerReminder,
 } from './prayer-awareness';
@@ -420,7 +421,13 @@ function getAyahLensState(): AyahLensState {
     prayer: {
       ...defaultState.prayer,
       ...stored.prayer,
-      settings: { ...defaultState.prayer.settings, ...stored.prayer?.settings },
+      settings: (() => {
+        const merged = { ...defaultState.prayer.settings, ...stored.prayer?.settings };
+        // Backfill preserved calculation location from legacy city/country when missing.
+        if (!merged.calculationCity && merged.source !== 'masjidly') merged.calculationCity = merged.city ?? '';
+        if (!merged.calculationCountry && merged.source !== 'masjidly') merged.calculationCountry = merged.country ?? '';
+        return merged;
+      })(),
       sentReminderKeys: stored.prayer?.sentReminderKeys ?? [],
     },
     todos: {
@@ -1299,19 +1306,11 @@ function sanitizeNumberSetting(value: unknown, fallback: number, min: number, ma
 function updatePrayerSettings(patch: Partial<PrayerSettings>): PrayerSettings {
   const state = getAyahLensState();
   const current = state.prayer.settings;
-  const nextSettings: PrayerSettings = {
-    enabled: typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled,
-    city: typeof patch.city === 'string' ? patch.city.trim().slice(0, 120) : current.city,
-    country: typeof patch.country === 'string' ? patch.country.trim().slice(0, 120) : current.country,
-    method: sanitizeNumberSetting(patch.method, current.method, 1, 99),
-    school: patch.school === 1 ? 1 : patch.school === 0 ? 0 : current.school,
-    reminderLeadMinutes: sanitizeNumberSetting(patch.reminderLeadMinutes, current.reminderLeadMinutes, 0, 120),
-    quietMinutesAfterPrayer: sanitizeNumberSetting(patch.quietMinutesAfterPrayer, current.quietMinutesAfterPrayer, 0, 120),
-    hasSavedSettings: typeof patch.hasSavedSettings === 'boolean' ? patch.hasSavedSettings : current.hasSavedSettings,
-    use24h: typeof patch.use24h === 'boolean' ? patch.use24h : current.use24h,
-  };
+  const nextSettings = mergePrayerSettings(current, patch);
   const shouldClearToday =
-    nextSettings.city !== current.city
+    nextSettings.source !== current.source
+    || nextSettings.mosqueSlug !== current.mosqueSlug
+    || nextSettings.city !== current.city
     || nextSettings.country !== current.country
     || nextSettings.method !== current.method
     || nextSettings.school !== current.school;
@@ -1356,7 +1355,7 @@ function updatePomodoroSettings(patch: Partial<PomodoroSettings>): PomodoroSetti
 async function refreshPrayerTimes(): Promise<AyahLensState['prayer']['today']> {
   const state = getAyahLensState();
   const { settings, today, tomorrow: previousTomorrow } = state.prayer;
-  if (!settings.city.trim() || !settings.country.trim()) return today;
+  if (settings.source === 'masjidly' ? !settings.mosqueSlug.trim() : (!settings.city.trim() || !settings.country.trim())) return today;
 
   const timezone = getUserTimezone() ?? 'UTC';
   const todayDate = new Date();
@@ -1367,23 +1366,19 @@ async function refreshPrayerTimes(): Promise<AyahLensState['prayer']['today']> {
   );
 
   try {
+    const fetchDay = settings.source === 'masjidly'
+      ? (date: Date) => fetchMasjidlyPrayerTimes({ mosqueSlug: settings.mosqueSlug, date })
+      : (date: Date) => fetchPrayerTimesByCity({
+        city: settings.city,
+        country: settings.country,
+        method: settings.method,
+        school: settings.school,
+        date,
+        timezone,
+      });
     const [fetchedToday, fetchedTomorrow] = await Promise.all([
-      fetchPrayerTimesByCity({
-        city: settings.city,
-        country: settings.country,
-        method: settings.method,
-        school: settings.school,
-        date: todayDate,
-        timezone,
-      }),
-      fetchPrayerTimesByCity({
-        city: settings.city,
-        country: settings.country,
-        method: settings.method,
-        school: settings.school,
-        date: tomorrowDate,
-        timezone,
-      }),
+      fetchDay(todayDate),
+      fetchDay(tomorrowDate),
     ]);
     setAyahLensState({
       ...getAyahLensState(),
@@ -4992,6 +4987,8 @@ function setupIPC() {
     void refreshPrayerTimes().catch(() => undefined);
     return settings;
   });
+
+  ipcMain.handle('masjidly-mosques-list', async () => listMasjidlyMosques());
 
   ipcMain.handle('prayer-times-get', async () => {
     const state = getAyahLensState();

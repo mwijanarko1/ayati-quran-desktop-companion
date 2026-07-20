@@ -153,10 +153,17 @@ export interface PrayerTimeEntry {
   time: string;
   at: number;
   isReminderEnabled: boolean;
+  iqamahTime?: string;
 }
 
 export interface PrayerSettings {
   enabled: boolean;
+  source: 'calculation' | 'masjidly';
+  mosqueSlug: string;
+  showIqamah: boolean;
+  /** Last calculation-source location; preserved while Masjidly is selected. */
+  calculationCity: string;
+  calculationCountry: string;
   city: string;
   country: string;
   method: number;
@@ -174,7 +181,9 @@ export interface PrayerDay {
   method: number;
   school: 0 | 1;
   timezone: string;
-  source: 'aladhan';
+  source: 'aladhan' | 'masjidly';
+  mosqueSlug?: string;
+  mosqueName?: string;
   fetchedAt: number;
   prayers: PrayerTimeEntry[];
   error?: string;

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getNextPrayer,
   isInsidePrayerQuietWindow,
+  mergePrayerSettings,
   shouldRefreshPrayerDay,
   shouldSendPrayerReminder,
 } from './prayer-awareness';
@@ -10,6 +11,11 @@ import type { PrayerDay, PrayerSettings } from './ayah-types';
 
 const settings: PrayerSettings = {
   enabled: true,
+  source: 'calculation',
+  mosqueSlug: '',
+  showIqamah: false,
+  calculationCity: 'London',
+  calculationCountry: 'United Kingdom',
   city: 'London',
   country: 'United Kingdom',
   method: 3,
@@ -74,6 +80,73 @@ describe('prayer awareness', () => {
     expect(shouldRefreshPrayerDay(day, tomorrow, settings, new Date('2026-05-03T08:00:00Z').getTime())).toBe(true);
     expect(shouldRefreshPrayerDay(day, null, { ...settings, city: 'Manchester' }, new Date('2026-05-02T08:00:00Z').getTime())).toBe(true);
     expect(shouldRefreshPrayerDay(day, tomorrow, settings, new Date('2026-05-02T08:00:00Z').getTime())).toBe(false);
+  });
+
+  it('preserves calculation location when switching to Masjidly and back', () => {
+    const calculation = mergePrayerSettings(settings, {
+      city: 'Manchester',
+      country: 'United Kingdom',
+      hasSavedSettings: true,
+    });
+    expect(calculation).toMatchObject({
+      source: 'calculation',
+      city: 'Manchester',
+      country: 'United Kingdom',
+      calculationCity: 'Manchester',
+      calculationCountry: 'United Kingdom',
+    });
+
+    const masjidly = mergePrayerSettings(calculation, {
+      source: 'masjidly',
+      mosqueSlug: 'mwhs',
+    });
+    expect(masjidly).toMatchObject({
+      source: 'masjidly',
+      mosqueSlug: 'mwhs',
+      city: '',
+      country: '',
+      calculationCity: 'Manchester',
+      calculationCountry: 'United Kingdom',
+    });
+
+    const restored = mergePrayerSettings(masjidly, { source: 'calculation' });
+    expect(restored).toMatchObject({
+      source: 'calculation',
+      city: 'Manchester',
+      country: 'United Kingdom',
+      mosqueSlug: 'mwhs',
+      calculationCity: 'Manchester',
+      calculationCountry: 'United Kingdom',
+    });
+  });
+
+  it('matches Masjidly days by selected mosque', () => {
+    const masjidlySettings: PrayerSettings = { ...settings, source: 'masjidly', mosqueSlug: 'mwhs' };
+    const masjidlyDay: PrayerDay = { ...day, source: 'masjidly', mosqueSlug: 'mwhs' };
+    expect(shouldRefreshPrayerDay(masjidlyDay, null, masjidlySettings, new Date('2026-05-02T08:00:00Z').getTime())).toBe(false);
+    expect(shouldRefreshPrayerDay(masjidlyDay, null, { ...masjidlySettings, mosqueSlug: 'other' }, new Date('2026-05-02T08:00:00Z').getTime())).toBe(true);
+  });
+
+  it('refreshes stale cached Masjidly times with unresolved iqamah rules, but not freshly fetched ones', () => {
+    const masjidlySettings: PrayerSettings = { ...settings, source: 'masjidly', mosqueSlug: 'masjid-risalah' };
+    const now = new Date('2026-05-02T08:00:00Z').getTime();
+    const unresolvedPrayers = day.prayers.map((prayer) => (
+      prayer.name === 'fajr' ? { ...prayer, iqamahTime: '10 minutes after adhan' } : prayer
+    ));
+    const freshDay: PrayerDay = {
+      ...day,
+      source: 'masjidly',
+      mosqueSlug: 'masjid-risalah',
+      fetchedAt: now - (30 * 60 * 1000),
+      prayers: unresolvedPrayers,
+    };
+    const staleDay: PrayerDay = {
+      ...freshDay,
+      fetchedAt: now - (2 * 60 * 60 * 1000),
+    };
+
+    expect(shouldRefreshPrayerDay(freshDay, null, masjidlySettings, now)).toBe(false);
+    expect(shouldRefreshPrayerDay(staleDay, null, masjidlySettings, now)).toBe(true);
   });
 
   it('refreshes after the last prayer when tomorrow times are missing or stale', () => {

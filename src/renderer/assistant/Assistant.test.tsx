@@ -1,8 +1,27 @@
+import '@testing-library/jest-dom/vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 
 import { Assistant } from './Assistant';
+
+type MockAyati = Partial<Window['ayati']> & {
+  updateAyahLensSetting: Mock;
+  listMasjidlyMosques: Mock;
+  getPrayerSettings: Mock;
+  updatePrayerSettings: Mock;
+  getPrayerTimes: Mock;
+  refreshPrayerTimes: Mock;
+  createTodo: Mock;
+  startPomodoro: Mock;
+  getSettings: Mock;
+  updateSettings: Mock;
+};
+
+function asAyati(mock: MockAyati): Window['ayati'] {
+  return mock as unknown as Window['ayati'];
+}
 
 vi.mock('@iconify/react', () => ({
   Icon: ({ icon }: { icon: string }) => <span data-icon={icon} />,
@@ -91,6 +110,11 @@ function createMockAyati() {
     executePetAction: vi.fn().mockResolvedValue({ ok: true }),
     getPrayerSettings: vi.fn().mockResolvedValue({
       enabled: false,
+      source: 'calculation',
+      mosqueSlug: '',
+      showIqamah: false,
+      calculationCity: '',
+      calculationCountry: '',
       city: '',
       country: '',
       method: 15,
@@ -102,6 +126,11 @@ function createMockAyati() {
     }),
     updatePrayerSettings: vi.fn().mockResolvedValue({
       enabled: true,
+      source: 'calculation',
+      mosqueSlug: '',
+      showIqamah: false,
+      calculationCity: 'London',
+      calculationCountry: 'United Kingdom',
       city: 'London',
       country: 'United Kingdom',
       method: 15,
@@ -110,6 +139,20 @@ function createMockAyati() {
       quietMinutesAfterPrayer: 15,
       hasSavedSettings: true,
       use24h: true,
+    }),
+    listMasjidlyMosques: vi.fn().mockResolvedValue([]),
+    updateAyahLensSetting: vi.fn().mockResolvedValue({
+      translationId: 131,
+      mushafId: 4,
+      captureMode: 'fullScreen',
+      saveScreenshots: false,
+      defaultSave: false,
+      contextualNudges: true,
+      nudgeCooldownMinutes: 15,
+      timedReminders: false,
+      timedReminderMinutes: 15,
+      recitationId: null,
+      reciterName: null,
     }),
     getPrayerTimes: vi.fn().mockResolvedValue({
       today: {
@@ -216,7 +259,7 @@ function createMockAyati() {
       indoPakNastaleeq: true,
     }),
     getQulRenderedVerse: vi.fn().mockResolvedValue(null),
-  } satisfies Partial<Window['ayati']>;
+  } as MockAyati;
 }
 
 describe('Assistant updates in settings', () => {
@@ -251,7 +294,7 @@ describe('Assistant updates in settings', () => {
       });
     Object.defineProperty(window, 'ayati', {
       configurable: true,
-      value: ayati as Window['ayati'],
+      value: asAyati(ayati),
     });
 
     await act(async () => {
@@ -278,7 +321,7 @@ describe('Assistant updates in settings', () => {
     });
     Object.defineProperty(window, 'ayati', {
       configurable: true,
-      value: ayati as Window['ayati'],
+      value: asAyati(ayati),
     });
 
     await act(async () => {
@@ -335,7 +378,7 @@ describe('Assistant updates in settings', () => {
     });
     Object.defineProperty(window, 'ayati', {
       configurable: true,
-      value: ayati as Window['ayati'],
+      value: asAyati(ayati),
     });
 
     await act(async () => {
@@ -382,7 +425,7 @@ describe('Assistant productivity tabs', () => {
     const ayati = createMockAyati();
     Object.defineProperty(window, 'ayati', {
       configurable: true,
-      value: ayati as Window['ayati'],
+      value: asAyati(ayati),
     });
 
     await act(async () => {
@@ -394,6 +437,7 @@ describe('Assistant productivity tabs', () => {
     expect(screen.getByRole('tab', { name: 'Focus' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Chat' })).not.toBeInTheDocument();
     expect(await screen.findByLabelText('Prayer city')).toBeInTheDocument();
+    expect(screen.getByLabelText('Prayer time source')).toHaveTextContent('Calculated times');
     expect(screen.getByLabelText('Prayer country')).toHaveRole('combobox');
     expect(screen.getByLabelText('Prayer city')).toHaveRole('combobox');
     expect(screen.getByLabelText('Prayer calculation method')).toHaveTextContent('Moonsighting Committee Worldwide');
@@ -411,6 +455,7 @@ describe('Assistant productivity tabs', () => {
     await userEvent.click(await screen.findByRole('option', { name: 'Hanafi' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(ayati.updatePrayerSettings).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'calculation',
       city: 'New York',
       country: 'United States',
       method: 2,
@@ -435,10 +480,126 @@ describe('Assistant productivity tabs', () => {
     expect(ayati.startPomodoro).toHaveBeenCalledWith(expect.objectContaining({ kind: 'focus' }));
   });
 
+  it('filters Masjidly mosques by country and city via IPC directory', async () => {
+    const ayati = createMockAyati();
+    ayati.listMasjidlyMosques.mockResolvedValue([
+      { slug: 'mwhs', name: 'Muslim Welfare House', cityName: 'Sheffield', countryName: 'United Kingdom', timezone: 'Europe/London' },
+      { slug: 'london-masjid', name: 'London Masjid', cityName: 'London', countryName: 'United Kingdom', timezone: 'Europe/London' },
+    ]);
+    Object.defineProperty(window, 'ayati', { configurable: true, value: asAyati(ayati) });
+
+    await act(async () => { render(<Assistant />); });
+    await userEvent.click(await screen.findByLabelText('Prayer time source'));
+    await userEvent.click(await screen.findByRole('option', { name: 'Masjidly mosque timetable' }));
+    await waitFor(() => expect(ayati.listMasjidlyMosques).toHaveBeenCalled());
+    await userEvent.click(await screen.findByLabelText('Masjidly country'));
+    await userEvent.click(await screen.findByRole('option', { name: 'United Kingdom' }));
+    await userEvent.click(screen.getByLabelText('Masjidly city'));
+    await userEvent.click(await screen.findByRole('option', { name: 'Sheffield' }));
+    await userEvent.click(screen.getByLabelText('Masjidly mosque'));
+    expect(await screen.findByRole('option', { name: 'Muslim Welfare House' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'London Masjid' })).not.toBeInTheDocument();
+  });
+
+  it('surfaces Masjidly directory load errors with retry', async () => {
+    const ayati = createMockAyati();
+    ayati.listMasjidlyMosques.mockRejectedValue(new Error('offline'));
+    Object.defineProperty(window, 'ayati', { configurable: true, value: asAyati(ayati) });
+
+    await act(async () => { render(<Assistant />); });
+    await userEvent.click(await screen.findByLabelText('Prayer time source'));
+    await userEvent.click(await screen.findByRole('option', { name: 'Masjidly mosque timetable' }));
+    expect(await screen.findByText('Could not load Masjidly mosques.')).toBeInTheDocument();
+
+    ayati.listMasjidlyMosques.mockResolvedValue([
+      { slug: 'mwhs', name: 'Muslim Welfare House', cityName: 'Sheffield', countryName: 'United Kingdom', timezone: 'Europe/London' },
+    ]);
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(screen.queryByText('Could not load Masjidly mosques.')).not.toBeInTheDocument());
+    await userEvent.click(await screen.findByLabelText('Masjidly country'));
+    expect(await screen.findByRole('option', { name: 'United Kingdom' })).toBeInTheDocument();
+  });
+
+  it('shows iqamah times in a separate column', async () => {
+    const ayati = createMockAyati();
+    ayati.getPrayerSettings.mockResolvedValue({
+      enabled: true,
+      source: 'masjidly',
+      mosqueSlug: 'mwhs',
+      showIqamah: true,
+      calculationCity: 'London',
+      calculationCountry: 'United Kingdom',
+      city: 'Sheffield',
+      country: 'United Kingdom',
+      method: 15,
+      school: 0,
+      reminderLeadMinutes: 10,
+      quietMinutesAfterPrayer: 15,
+      hasSavedSettings: true,
+      use24h: true,
+    });
+    ayati.getPrayerTimes.mockResolvedValue({
+      today: {
+        date: '2026-05-02',
+        city: 'Sheffield',
+        country: 'United Kingdom',
+        method: 0,
+        school: 0,
+        timezone: 'Europe/London',
+        source: 'masjidly',
+        fetchedAt: Date.now(),
+        prayers: [
+          { name: 'fajr', label: 'Fajr', time: '04:11', iqamahTime: '04:30', at: Date.now() + 1000, isReminderEnabled: true },
+        ],
+      },
+      tomorrow: null,
+    });
+    Object.defineProperty(window, 'ayati', { configurable: true, value: asAyati(ayati) });
+
+    await act(async () => { render(<Assistant />); });
+
+    expect(await screen.findByRole('columnheader', { name: 'Adhan' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Iqamah' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '04:11' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '04:30' })).toBeInTheDocument();
+  });
+
+  it('uses list semantics when iqamah is hidden', async () => {
+    const ayati = createMockAyati();
+    ayati.getPrayerSettings.mockResolvedValue({
+      enabled: true,
+      source: 'calculation',
+      mosqueSlug: '',
+      showIqamah: false,
+      calculationCity: 'London',
+      calculationCountry: 'United Kingdom',
+      city: 'London',
+      country: 'United Kingdom',
+      method: 15,
+      school: 0,
+      reminderLeadMinutes: 10,
+      quietMinutesAfterPrayer: 15,
+      hasSavedSettings: true,
+      use24h: true,
+    });
+    Object.defineProperty(window, 'ayati', { configurable: true, value: asAyati(ayati) });
+
+    await act(async () => { render(<Assistant />); });
+
+    expect(await screen.findByRole('list', { name: 'Prayer times' })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Adhan' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
   it('keeps prayer setup off the Prayers tab after the first saved setup', async () => {
     const ayati = createMockAyati();
     ayati.getPrayerSettings.mockResolvedValue({
       enabled: true,
+      source: 'calculation',
+      mosqueSlug: '',
+      showIqamah: false,
+      calculationCity: 'London',
+      calculationCountry: 'United Kingdom',
       city: 'London',
       country: 'United Kingdom',
       method: 15,
@@ -450,7 +611,7 @@ describe('Assistant productivity tabs', () => {
     });
     Object.defineProperty(window, 'ayati', {
       configurable: true,
-      value: ayati as Window['ayati'],
+      value: asAyati(ayati),
     });
 
     await act(async () => {
@@ -481,7 +642,7 @@ describe('Assistant settings shortcuts', () => {
     });
     Object.defineProperty(window, 'ayati', {
       configurable: true,
-      value: ayati as Window['ayati'],
+      value: asAyati(ayati),
     });
 
     await act(async () => {
@@ -499,7 +660,7 @@ describe('Assistant settings shortcuts', () => {
     const ayati = createMockAyati();
     Object.defineProperty(window, 'ayati', {
       configurable: true,
-      value: ayati as Window['ayati'],
+      value: asAyati(ayati),
     });
 
     await act(async () => {
@@ -528,7 +689,7 @@ describe('Assistant developer settings', () => {
     });
     Object.defineProperty(window, 'ayati', {
       configurable: true,
-      value: ayati as Window['ayati'],
+      value: asAyati(ayati),
     });
 
     await act(async () => {
@@ -552,7 +713,7 @@ describe('Assistant developer settings', () => {
     const ayati = createMockAyati();
     Object.defineProperty(window, 'ayati', {
       configurable: true,
-      value: ayati as Window['ayati'],
+      value: asAyati(ayati),
     });
 
     await act(async () => {
@@ -573,7 +734,7 @@ describe('Assistant developer settings', () => {
     const ayati = createMockAyati();
     Object.defineProperty(window, 'ayati', {
       configurable: true,
-      value: ayati as Window['ayati'],
+      value: asAyati(ayati),
     });
 
     await act(async () => {
@@ -594,7 +755,7 @@ describe('Assistant developer settings', () => {
     const ayati = createMockAyati();
     Object.defineProperty(window, 'ayati', {
       configurable: true,
-      value: ayati as Window['ayati'],
+      value: asAyati(ayati),
     });
 
     await act(async () => {

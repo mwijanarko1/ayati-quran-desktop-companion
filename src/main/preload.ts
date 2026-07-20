@@ -124,6 +124,7 @@ contextBridge.exposeInMainWorld('ayati', {
   },
   getPrayerSettings: () => ipcRenderer.invoke('prayer-settings-get'),
   updatePrayerSettings: (patch: Partial<PrayerSettings>) => ipcRenderer.invoke('prayer-settings-update', patch),
+  listMasjidlyMosques: () => ipcRenderer.invoke('masjidly-mosques-list'),
   getPrayerTimes: () => ipcRenderer.invoke('prayer-times-get'),
   refreshPrayerTimes: () => ipcRenderer.invoke('prayer-times-refresh'),
   getTodos: () => ipcRenderer.invoke('todo-list'),
@@ -484,9 +485,22 @@ export interface PrayerTimeEntry {
   time: string;
   at: number;
   isReminderEnabled: boolean;
+  iqamahTime?: string;
+}
+export interface MasjidlyMosqueSummary {
+  slug: string;
+  name: string;
+  cityName: string;
+  countryName: string;
+  timezone: string;
 }
 export interface PrayerSettings {
   enabled: boolean;
+  source: 'calculation' | 'masjidly';
+  mosqueSlug: string;
+  showIqamah: boolean;
+  calculationCity: string;
+  calculationCountry: string;
   city: string;
   country: string;
   method: number;
@@ -494,6 +508,7 @@ export interface PrayerSettings {
   reminderLeadMinutes: number;
   quietMinutesAfterPrayer: number;
   hasSavedSettings: boolean;
+  use24h: boolean;
 }
 export interface PrayerDay {
   date: string;
@@ -502,7 +517,9 @@ export interface PrayerDay {
   method: number;
   school: 0 | 1;
   timezone: string;
-  source: 'aladhan';
+  source: 'aladhan' | 'masjidly';
+  mosqueSlug?: string;
+  mosqueName?: string;
   fetchedAt: number;
   prayers: PrayerTimeEntry[];
   error?: string;
@@ -744,6 +761,7 @@ export interface AyatiAPI {
   onAyahOAuthCallback: (callback: (callbackUrl: string) => void) => void;
   getPrayerSettings: () => Promise<PrayerSettings>;
   updatePrayerSettings: (patch: Partial<PrayerSettings>) => Promise<PrayerSettings>;
+  listMasjidlyMosques: () => Promise<MasjidlyMosqueSummary[]>;
   getPrayerTimes: () => Promise<PrayerTimesBundle | null>;
   refreshPrayerTimes: () => Promise<PrayerTimesBundle | null>;
   getTodos: () => Promise<TodoItem[]>;

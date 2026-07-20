@@ -161,15 +161,13 @@ describe('buildTimedQuranReminder', () => {
     vi.useRealTimers();
   });
 
-  it('chooses a random surah and then a random verse from that surah', async () => {
-    const randomSpy = vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.999)
-      .mockReturnValueOnce(0.999);
+  it('chooses a random verse from the complete-sentence pool', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.999999);
     const fetchVerseContent = vi.fn(async (verseKey: string) => ({
       ...verseContent,
       verseKey,
-      surahName: 'An-Nas',
-      ayahNumber: 6,
+      surahName: 'Al-Masad',
+      ayahNumber: 2,
     }));
 
     const result = await buildTimedQuranReminder(defaultInput({
@@ -180,11 +178,11 @@ describe('buildTimedQuranReminder', () => {
       fetchVerseContent,
     }));
 
-    expect(fetchVerseContent).toHaveBeenCalledWith('114:6');
+    expect(fetchVerseContent).toHaveBeenCalledWith('111:2');
     expect(result?.reflection).toMatchObject({
-      verseKey: '114:6',
-      surahName: 'An-Nas',
-      ayahNumber: 6,
+      verseKey: '111:2',
+      surahName: 'Al-Masad',
+      ayahNumber: 2,
     });
     randomSpy.mockRestore();
   });

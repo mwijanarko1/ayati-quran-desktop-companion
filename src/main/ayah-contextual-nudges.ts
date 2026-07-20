@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 
 import { getFallbackVerseContent } from './ayah-fallbacks';
 import { rankAyahCandidates } from './ayah-theme-engine';
-import { getRandomQuranVerseKey } from './quran-surah-verse-counts';
+import { getRandomQuranVerseKey } from './quran-sentence-verse-pool';
 import type {
   AyahLensSettings,
   AyahLensState,

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AyahCollection, AyahReflection, Footnote } from '../../main/ayah-types';
 import { QulArabicText } from '../components/QulArabicText';
+import './translation-footnotes.css';
 
 /** Regex matching footnote tokens embedded in translation text: \x00FN:NUMBER\x00 */
 const FN_TOKEN_RE = /\x00FN:(\d+)\x00/g;
@@ -115,7 +116,7 @@ function getFootnoteInfo(footnotes: Footnote[] | undefined, number: number): Foo
   return footnotes?.find((fn) => fn.number === number);
 }
 
-function TranslationWithFootnotes({
+export function TranslationWithFootnotes({
   text,
   footnotes,
 }: {
@@ -146,6 +147,9 @@ function TranslationWithFootnotes({
         }
         const num = Number.parseInt(seg.value, 10);
         const info = footnotes ? getFootnoteInfo(footnotes, num) : undefined;
+        if (!info) {
+          return <sup key={`fn-${num}`} className="ayah-footnote-marker">{num}</sup>;
+        }
         const isOpen = openFootnotes.has(num);
         return (
           <React.Fragment key={`fn-${num}`}>
@@ -154,13 +158,13 @@ function TranslationWithFootnotes({
                 type="button"
                 className={`ayah-footnote-badge${isOpen ? ' ayah-footnote-badge--open' : ''}`}
                 onClick={() => toggleFootnote(num)}
-                aria-label={`Footnote ${num}${info ? `: ${info.text.slice(0, 60)}` : ''}`}
+                aria-label={`Footnote ${num}: ${info.text.slice(0, 60)}`}
                 aria-expanded={isOpen}
               >
                 {num}
               </button>
             </sup>
-            {isOpen && info && (
+            {isOpen && (
               <span className="ayah-footnote-popover">
                 <span className="ayah-footnote-number">{num}.</span>
                 {info.text}

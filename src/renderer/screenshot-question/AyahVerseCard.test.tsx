@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AyahVerseCard, getTafsirParagraphs } from './AyahVerseCard';
+import { AyahVerseCard, getTafsirParagraphs, TranslationWithFootnotes } from './AyahVerseCard';
 import type { AyahReflection } from '../../main/ayah-types';
 
 const reflection: AyahReflection = {
@@ -57,6 +57,31 @@ describe('AyahVerseCard', () => {
     await user.click(screen.getByRole('button', { name: /save bookmark/i }));
 
     expect(handleSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders translation footnotes without leaking internal markers', async () => {
+    const user = userEvent.setup();
+    render(
+      <AyahVerseCard
+        reflection={{
+          ...reflection,
+          translation: 'A clear sign\x00FN:1\x00 for those who reflect.',
+          footnotes: [{ id: 42, number: 1, text: 'An explanatory footnote.' }],
+        }}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/FN:1/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Footnote 1/i }));
+    expect(screen.getByText('An explanatory footnote.')).toBeVisible();
+  });
+
+  it('renders a plain footnote number when details are unavailable', () => {
+    render(<TranslationWithFootnotes text={'A clear sign\x00FN:1\x00.'} />);
+
+    expect(screen.getByText('1')).toHaveClass('ayah-footnote-marker');
+    expect(screen.queryByText(/FN:1/)).not.toBeInTheDocument();
   });
 
   it('exposes tafsir, audio, note, collection, feedback, alternate, and share actions', async () => {
