@@ -177,6 +177,7 @@ let petChatWindow: BrowserWindow | null = null;
 let petPomodoroTimerWindow: BrowserWindow | null = null;
 let pendingPomodoroTimerLoadHandler: (() => void) | null = null;
 let assistantWindow: BrowserWindow | null = null;
+let assistantWindowSize: { width: number; height: number } | null = null;
 let chatbarWindow: BrowserWindow | null = null;
 let screenshotQuestionWindow: BrowserWindow | null = null;
 let onboardingWindow: BrowserWindow | null = null;
@@ -3409,16 +3410,16 @@ function refreshPetAnchoredPanelsForPomodoroLayout(): void {
 function updateAssistantPosition() {
   if (!petWindow || !assistantWindow || !assistantWindow.isVisible()) return;
 
+  const size = assistantWindowSize ?? { width: ASSISTANT_WINDOW_WIDTH, height: ASSISTANT_WINDOW_HEIGHT };
   const avoidBounds = workspaceBrowserWindow && !workspaceBrowserWindow.isDestroyed()
     ? workspaceBrowserWindow.getBounds()
     : undefined;
   const [petX, petY] = petWindow.getPosition();
   const [petWidth] = petWindow.getSize();
-  const [assistantWidth, assistantHeight] = assistantWindow.getSize();
   const { workArea } = screen.getPrimaryDisplay();
   const position = getWindowPositionNearAnchor({
     anchor: { x: petX, y: petY, width: petWidth, height: PET_WINDOW_HEIGHT },
-    windowSize: { width: assistantWidth, height: assistantHeight },
+    windowSize: size,
     workArea,
     verticalGap: verticalGapAbovePetClearingPomodoroTimer(ASSISTANT_VERTICAL_GAP),
     avoidBounds,
@@ -3645,6 +3646,13 @@ function createAssistantWindow(options?: { preloadOnly?: boolean }) {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+  assistantWindowSize = { width: ASSISTANT_WINDOW_WIDTH, height: ASSISTANT_WINDOW_HEIGHT };
+  assistantWindow.on('resize', () => {
+    if (assistantWindow && !assistantWindow.isDestroyed()) {
+      const [w, h] = assistantWindow.getSize();
+      assistantWindowSize = { width: w, height: h };
+    }
   });
   wireDebugWindowBorder(assistantWindow);
   assistantWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
